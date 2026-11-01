@@ -81,7 +81,11 @@ CLI arguments
 
 The output is first written to an exclusively created .part file. After transfer completion, FluxGet synchronizes and closes the file, creates a hard link at the final destination, and removes the partial name. If publication is unsupported or the final destination already exists, it reports an error and keeps the partial file.
 
+The download function returns the number of bytes written and an error, if one occurred; a retained partial file does not mean the download can be resumed.
+It uses Go's `defer` to schedule cleanup when the function returns.
+
 Retained partial bytes are not yet resumable through the CLI. Existing partial files are refused so that a new invocation cannot silently truncate earlier work.
+Git ignores partial downloads, generated binaries, and local VibeWise learning notes.
 
 | File | Responsibility |
 | --- | --- |
@@ -90,6 +94,31 @@ Retained partial bytes are not yet resumable through the CLI. Existing partial f
 | download_test.go | Tests using local HTTP servers |
 | go.mod | Module identity and Go baseline |
 | project.md | Development roadmap and release boundaries |
+
+## Debugging in VS Code
+
+1. Open the repository folder in VS Code.
+2. Install the Go extension published by the Go team (golang.go).
+3. Open main.go and click beside line 15, on the os.Exit call, to set a breakpoint. A breakpoint pauses execution before that line runs.
+4. Open Run and Debug and select **FluxGet: Debug download**.
+5. Press F5. Enter a direct HTTP/HTTPS URL and a new output filename when prompted.
+6. Allow the Go extension to install Delve if it prompts for the debugger, then start again if necessary.
+
+The checked-in .vscode/launch.json builds the package in the workspace folder and passes the requested URL and output to the app. Relative output paths are resolved inside the repository. The default debug-download.json output and debugger binaries are ignored by Git.
+
+| Key | Action |
+| --- | --- |
+| F5 | Start debugging, or continue to the next breakpoint |
+| F10 | Execute the current line without stepping into its function calls |
+| F11 | Step into a function call |
+| Shift+F11 | Return from the current function to its caller |
+| Shift+F5 | Stop the debug session |
+
+From the first breakpoint, F11 enters run. Use F10 to follow flag setup and parsing. Inspect variables in the Variables panel or by hovering over them. After flags.Parse, the Watch expressions *rawURL and *destination show the supplied strings.
+
+Use a fresh output path for each download. The app refuses an existing output or partial file. Debugger configuration has been checked as JSON; a live VS Code/Delve session still needs to be verified on your machine.
+
+See the [Go extension debugging guide](https://github.com/golang/vscode-go/wiki/debugging) for tool installation and troubleshooting.
 
 ## Development checks
 

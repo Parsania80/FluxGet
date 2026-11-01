@@ -1,0 +1,13 @@
+# Local VS Code debugger output
+/__debug_bin*
+/debug-download.json
+/debug-download.json.part
+
+# Local learning notes
+/.vibe-wise/
+/.sensible-vibes/
+
+# Generated binaries and partial downloads
+/fluxget
+/fluxget.exe
+*.part

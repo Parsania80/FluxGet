@@ -39,7 +39,8 @@ The application is local software. A hosted server, user accounts, PostgreSQL cl
 - Successful output is published through a same-directory hard link, then the partial name is removed. Existing destinations and partial files are refused. Filesystems without hard-link support fail safely with the partial file retained; no portable rename-overwrite guarantee is assumed.
 - Automated tests are written for binary and empty files, HTTP errors, truncated responses, existing files, destination-creation races, and cancellation. Their execution has not been verified from operator output.
 - Retaining partial data does not yet enable resume: no remote validator or checkpoint metadata is saved. Recovery-window retries, validated resume, parallelism, persistence, progress display, checksums, and additional platform verification remain future steps.
-- README.md documents the actual prototype, usage, verification commands, and limitations. First-commit preparation adds .gitignore rules for local learning notes and generated output, plus .gitattributes for consistent text line endings. A Git commit, push, and passing automated checks have not yet been verified.
+- README.md documents the actual prototype, usage, verification commands, and limitations. Local Git metadata now contains commit 195d06bef804. Remote publication and automated check results have not been verified. The current .gitignore covers debugger binaries and the default debug download.
+- .vscode/launch.json adds an optional Go/Delve launch profile that prompts for a URL and destination. README.md includes breakpoint and stepping instructions. Debugger binaries and the default debug download are ignored; a live debugger session remains unverified.
 
 ## 2. Terms used in this document
 
