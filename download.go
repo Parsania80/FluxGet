@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -9,11 +11,12 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
 // download performs one sequential transfer. It does not retry or resume yet.
 // Partial output is retained on failure, but is not proof of resumability.
-func download(ctx context.Context, client *http.Client, rawURL, destination string) (int64, error) {
+func download(ctx context.Context, client *http.Client, rawURL, destination, expectedSHA256 string, progress io.Writer) (int64, error) {
 	if ctx == nil || client == nil {
 		return 0, errors.New("a context and HTTP client are required")
 	}
@@ -29,6 +32,13 @@ func download(ctx context.Context, client *http.Client, rawURL, destination stri
 	}
 	if strings.TrimSpace(destination) == "" {
 		return 0, errors.New("a destination file is required")
+	}
+	var expected []byte
+	if expectedSHA256 != "" {
+		expected, err = hex.DecodeString(expectedSHA256)
+		if err != nil || len(expected) != sha256.Size {
+			return 0, errors.New("SHA-256 must be 64 hexadecimal characters")
+		}
 	}
 	partialPath := destination + ".part"
 	for _, path := range []string{destination, partialPath} {
@@ -76,7 +86,11 @@ func download(ctx context.Context, client *http.Client, rawURL, destination stri
 	}()
 
 	// Copy streams through bounded buffering rather than retaining the whole file.
-	written, err := io.Copy(partial, response.Body)
+	hash := sha256.New()
+	tracker := &progressWriter{writer: io.MultiWriter(partial, hash), output: progress, total: response.ContentLength, start: time.Now()}
+	tracker.report()
+	written, err := io.Copy(tracker, response.Body)
+	tracker.report()
 	if err != nil {
 		return written, fmt.Errorf("transfer failed; partial data kept at %q: %w", partialPath, err)
 	}
@@ -85,6 +99,9 @@ func download(ctx context.Context, client *http.Client, rawURL, destination stri
 	}
 	if err := ctx.Err(); err != nil {
 		return written, fmt.Errorf("download canceled; partial data kept at %q: %w", partialPath, err)
+	}
+	if expected != nil && !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), expectedSHA256) {
+		return written, fmt.Errorf("SHA-256 mismatch; partial data kept at %q", partialPath)
 	}
 	if err := partial.Sync(); err != nil {
 		return written, fmt.Errorf("sync partial file %q: %w", partialPath, err)
@@ -108,6 +125,37 @@ func download(ctx context.Context, client *http.Client, rawURL, destination stri
 		return written, fmt.Errorf("file completed at %q, but partial-file cleanup failed: %w", destination, err)
 	}
 	return written, nil
+}
+
+type progressWriter struct {
+	writer  io.Writer
+	output  io.Writer
+	total   int64
+	written int64
+	start   time.Time
+	last    time.Time
+}
+
+func (p *progressWriter) Write(data []byte) (int, error) {
+	n, err := p.writer.Write(data)
+	p.written += int64(n)
+	if time.Since(p.last) >= time.Second {
+		p.report()
+	}
+	return n, err
+}
+
+func (p *progressWriter) report() {
+	if p.output == nil {
+		return
+	}
+	p.last = time.Now()
+	speed := float64(p.written) / p.last.Sub(p.start).Seconds()
+	if p.total > 0 {
+		fmt.Fprintf(p.output, "Downloaded %d/%d bytes (%.1f%%), %.0f bytes/s\n", p.written, p.total, float64(p.written)*100/float64(p.total), speed)
+	} else {
+		fmt.Fprintf(p.output, "Downloaded %d bytes, %.0f bytes/s\n", p.written, speed)
+	}
 }
 
 func requireAbsent(path string) error {

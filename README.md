@@ -2,7 +2,12 @@
 
 A Go download manager focused on reliable file transfers, with parallel downloads and multi-interface support planned for later milestones.
 
-**Status:** Early CLI prototype. Sequential downloads are implemented. One live download has been reported successful on Ubuntu; automated verification and native testing on other operating systems are still pending.
+**Status:** Early CLI prototype. Sequential downloads are implemented. One live download has been reported successful on Ubuntu; automated checks passed on Linux with Go 1.26.8. Native testing on other operating systems is still pending.
+
+The next development step is to resolve the remaining initial design choices and verify platform and storage failure behavior before adding parallel transfers or recovery.
+In particular, full-disk and permission failures still need verification.
+Go 1.26.8 is installed for the current Linux user under `~/.local/share/go1.26.8`, with commands in `~/.local/bin`.
+For learning-focused development, activate VibeWise with `$vibe-wise:learn` in Codex.
 
 ## Current features
 
@@ -12,6 +17,8 @@ A Go download manager focused on reliable file transfers, with parallel download
 - Preserve partial output when a transfer fails or is canceled with Ctrl+C.
 - Refuse to overwrite an existing destination or partial file.
 - Detect truncated responses when the server supplies a content length.
+- Show bytes and average speed during transfers, plus a percentage when the size is known.
+- Optionally verify a supplied SHA-256 checksum before publishing the output.
 - Publish completed output without replacing a destination created during transfer.
 
 ## Requirements
@@ -46,9 +53,12 @@ Both flags are required:
 | --- | --- |
 | -url | A direct file URL with an explicit http:// or https:// scheme |
 | -out | The output path; neither that path nor its .part companion may already exist |
+| -sha256 | Optional expected SHA-256 checksum as 64 hexadecimal characters |
 | -h | Show help |
 
-Successful execution reports the number of bytes written and the destination. Ctrl+C cancels an active request.
+Progress is written to standard error as data arrives; successful execution reports the number of bytes written and the destination on standard output. Ctrl+C cancels an active request. A checksum mismatch leaves the `.part` file for inspection and does not publish the destination.
+Use a checksum from a trusted source: it verifies that the downloaded bytes match the expected file.
+Most downloads can be started without a checksum; the `-sha256` flag is optional.
 
 ## Build
 
@@ -75,6 +85,7 @@ CLI arguments
     -> request validation
     -> HTTP response checks
     -> streamed writes to OUTPUT.part
+    -> optional SHA-256 verification
     -> synchronization and close
     -> no-overwrite publication as OUTPUT
 ```
@@ -131,13 +142,14 @@ go test -race ./... &&
 go vet ./...
 ```
 
-The tests cover binary and empty files, rejected HTTP statuses, truncated responses, existing files, competing destination creation, and cancellation after data has been written. The race detector needs a supported platform and a suitable C compiler. Test requests use local servers rather than internet services.
+The tests cover binary and empty files, known and unknown lengths, redirects and TLS, checksums, progress, rejected HTTP statuses, truncated responses, partial writes, existing files, competing destination creation, and cancellation after data has been written. The race detector needs a supported platform and a suitable C compiler. Test requests use local servers rather than internet services.
 
 ## Current limitations
 
 - No pause/resume, recovery retry window, automatic retries, or persistent queue yet.
 - No parallel range requests or simultaneous network-interface use yet.
-- No progress display, expected-checksum verification, GUI, or browser integration yet.
+- No GUI or browser integration yet.
+- Progress updates occur when data is written, so a stalled connection does not produce regular updates.
 - Requests support cancellation but have no application-configured read-inactivity deadline.
 - Public direct URLs are the intended input; credential-bearing links and authenticated website workflows are outside the current scope.
 - Final publication requires hard-link support. Power-loss recovery is not guaranteed.

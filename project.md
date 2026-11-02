@@ -2,7 +2,7 @@
 
 A Go download manager inspired by IDM, with reliable transfers first and multi-interface downloading as a later distinguishing feature.
 
-**Status:** First sequential-download implementation written. The operator reports one successful live download of 22,898 bytes. Formatting, automated tests, race checks, vetting, and broader platform verification remain unverified. Other roadmap features remain planned.
+**Status:** First sequential-download implementation written. The operator reports one successful live download of 22,898 bytes. Formatting, automated tests, race checks, and vetting passed on Linux with Go 1.26.8 on 2026-11-02; broader platform verification remains pending. Other roadmap features remain planned.
 
 **Project purpose:** Learn Go through implementation and publish a GitHub project that demonstrates backend and systems engineering: concurrency, networking, persistence, recovery, testing, and clear architecture.
 
@@ -35,11 +35,11 @@ The application is local software. A hosted server, user accounts, PostgreSQL cl
 - The learner approved the first four files: go.mod, main.go, download.go, and download_test.go.
 - The project is FluxGet and the Go module is github.com/Parsania80/FluxGet, matching the GitHub repository. The Go baseline is 1.26; the operator has verified Go 1.26.8 on linux/amd64.
 - Build the CLI as fluxget with go build -o fluxget . (use fluxget.exe on Windows).
-- The CLI accepts -url and -out. It streams one response to an exclusively created destination.part file, supports Ctrl+C cancellation, rejects non-200 responses, and preserves partial bytes on transfer failure.
+- The CLI accepts -url and -out plus optional -sha256. It streams one response to an exclusively created destination.part file, reports progress, supports Ctrl+C cancellation, rejects non-200 responses, and preserves partial bytes on transfer failure or checksum mismatch.
 - Successful output is published through a same-directory hard link, then the partial name is removed. Existing destinations and partial files are refused. Filesystems without hard-link support fail safely with the partial file retained; no portable rename-overwrite guarantee is assumed.
-- Automated tests are written for binary and empty files, HTTP errors, truncated responses, existing files, destination-creation races, and cancellation. Their execution has not been verified from operator output.
-- Retaining partial data does not yet enable resume: no remote validator or checkpoint metadata is saved. Recovery-window retries, validated resume, parallelism, persistence, progress display, checksums, and additional platform verification remain future steps.
-- README.md documents the actual prototype, usage, verification commands, and limitations. Local Git metadata now contains commit 195d06bef804. Remote publication and automated check results have not been verified. The current .gitignore covers debugger binaries and the default debug download.
+- Automated tests cover binary and empty files, unknown length, redirects and TLS, progress, checksums, HTTP errors, truncated responses, partial writes, existing files, destination-creation races, and cancellation. They pass on Linux with Go 1.26.8.
+- Retaining partial data does not yet enable resume: no remote validator or checkpoint metadata is saved. Recovery-window retries, validated resume, parallelism, persistence, and additional platform verification remain future steps.
+- README.md documents the actual prototype, usage, verification commands, and limitations. Local Git metadata now contains commit 195d06bef804. Remote publication has not been verified. The current .gitignore covers debugger binaries and the default debug download.
 - .vscode/launch.json adds an optional Go/Delve launch profile that prompts for a URL and destination. README.md includes breakpoint and stepping instructions. Debugger binaries and the default debug download are ignored; a live debugger session remains unverified.
 
 ## 2. Terms used in this document
@@ -251,15 +251,15 @@ No storage library or GUI framework has been selected by this roadmap.
 
 **Goal:** Complete the smallest useful download before adding concurrency.
 
-- [ ] Accept a public URL and a safe output destination.
-- [ ] Stream the response into a partial file with bounded memory use.
-- [ ] Handle redirects, TLS errors, unsuccessful statuses, and network cancellation.
-- [ ] Support known and unknown response lengths.
-- [ ] Report downloaded bytes, speed, and useful progress.
+- [x] Accept a public URL and a safe output destination.
+- [x] Stream the response into a partial file with bounded memory use.
+- [x] Handle redirects, TLS errors, unsuccessful statuses, and network cancellation.
+- [x] Support known and unknown response lengths.
+- [x] Report downloaded bytes, speed, and useful progress.
 - [ ] Handle partial writes, full disks, permissions, and existing destinations.
-- [ ] Add optional expected SHA-256 verification.
-- [ ] Publish the final file only after successful completion and required verification.
-- [ ] Test empty files, binary files, interrupted bodies, and incorrect declared lengths.
+- [x] Add optional expected SHA-256 verification.
+- [x] Publish the final file only after successful completion and required verification.
+- [x] Test empty files, binary files, interrupted bodies, and incorrect declared lengths.
 
 **Done when:** Successful output matches the source exactly and failed transfers cannot appear complete.
 

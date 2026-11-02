@@ -20,6 +20,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 	rawURL := flags.String("url", "", "Public HTTP or HTTPS file URL")
 	destination := flags.String("out", "", "Destination file (must not already exist)")
+	checksum := flags.String("sha256", "", "Expected SHA-256 checksum (optional)")
 	flags.Usage = func() {
 		fmt.Fprintln(stderr, "Usage: fluxget -url URL -out FILE")
 		flags.PrintDefaults()
@@ -40,7 +41,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	written, err := download(ctx, &http.Client{}, *rawURL, *destination)
+	written, err := download(ctx, &http.Client{}, *rawURL, *destination, *checksum, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "Download failed after %d bytes: %v\n", written, err)
 		return 1
