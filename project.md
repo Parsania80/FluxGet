@@ -13,10 +13,11 @@ A Go download manager inspired by IDM, with reliable transfers first and multi-i
 ## 1. Product definition
 
 Build a download manager that accepts direct HTTP/HTTPS file URLs, downloads reliably, and preserves recoverable progress after interruption.
+The long-term product goal is to approach IDM's practical download-management capabilities as closely as feasible, with Linux support and a portable codebase. Feature selection and behavior should be checked against real requirements and platform constraints; the release boundaries below remain in effect.
 
 The long-term target is Windows, macOS, and Linux. Development may move between Linux and Windows using one shared Go codebase. Platform-specific features belong in small adapters.
 
-The first release is **v0.1: Reliable Download Engine**, delivered through a CLI. A reusable engine allows a desktop GUI to be added later without rewriting download logic.
+The first release is **v0.1: Reliable Download Engine**, delivered through a CLI and targeting Linux/amd64 first. Keep the shared Go code portable so ARM64, Windows, and macOS can be tested and supported later. A reusable engine allows a desktop GUI to be added later without rewriting download logic.
 
 ### First demonstration
 
@@ -37,8 +38,10 @@ The application is local software. A hosted server, user accounts, PostgreSQL cl
 - Build the CLI as fluxget with go build -o fluxget . (use fluxget.exe on Windows).
 - The CLI accepts -url and -out plus optional -sha256. It streams one response to an exclusively created destination.part file, reports progress, supports Ctrl+C cancellation, rejects non-200 responses, and preserves partial bytes on transfer failure or checksum mismatch.
 - Successful output is published through a same-directory hard link, then the partial name is removed. Existing destinations and partial files are refused. Filesystems without hard-link support fail safely with the partial file retained; no portable rename-overwrite guarantee is assumed.
-- Automated tests cover binary and empty files, unknown length, redirects and TLS, progress, checksums, HTTP errors, truncated responses, partial writes, existing files, destination-creation races, and cancellation. They pass on Linux with Go 1.26.8.
-- Retaining partial data does not yet enable resume: no remote validator or checkpoint metadata is saved. Recovery-window retries, validated resume, parallelism, persistence, and additional platform verification remain future steps.
+- Automated tests cover binary and empty files, unknown length, redirects and TLS, progress, checksums, HTTP errors, truncated responses, partial writes, disk-full and permission failures, checkpoint update failure and recovery, existing files, destination-creation races, and cancellation. They pass on Linux with Go 1.26.8.
+- Eligible Linux sequential transfers save versioned JSON checkpoints during transfer and on interruption. The `-resume` command locks the job and partial file, verifies the saved prefix and remote representation, and validates the actual resumed response before writing.
+- Linux process-kill tests cover checkpoint data write, sync and publication, plus the points before and after final linking and partial-file removal. A completed-publication checkpoint allows explicit `-resume` to verify and reconcile these final-publication states without overwriting conflicting files.
+- Resume currently requires a known length, strong ETag, unchanged resolved URL, and valid range support. Recovery-window retries, parallelism, a persistent queue, and additional platform verification remain future steps.
 - README.md documents the actual prototype, usage, verification commands, and limitations. Local Git metadata now contains commit 195d06bef804. Remote publication has not been verified. The current .gitignore covers debugger binaries and the default debug download.
 - .vscode/launch.json adds an optional Go/Delve launch profile that prompts for a URL and destination. README.md includes breakpoint and stepping instructions. Debugger binaries and the default debug download are ignored; a live debugger session remains unverified.
 
@@ -69,7 +72,7 @@ A downloaded byte count is not proof of a correct file. A server validator is no
 
 Release labels express order, not fixed dates. Estimate implementation effort after the initial decisions and sequential download prototype.
 
-Cross-platform v0.1 does not imply cross-platform multi-interface support. Report exactly which capabilities have been verified on each platform.
+The first release targets Linux/amd64; ARM64, Windows, and macOS support requires later native testing. Cross-platform download support does not imply cross-platform multi-interface support. Report exactly which capabilities have been verified on each platform.
 
 ## 4. v0.1 features
 
@@ -178,7 +181,7 @@ HTTP defines range requests and conditional retrieval, and permits a server to i
 - Recovery may redownload uncheckpointed work; it must not skip missing bytes.
 - Validate metadata versions, chunk boundaries, output identity, and partial-file availability before reuse.
 - Refuse conflicting writers to the same job and partial file.
-- Treat interrupted jobs as recoverable or paused after restart; finalize the startup behavior in Phase 0.
+- Restore interrupted jobs as paused after restart, as specified by the lifecycle behavior below.
 - Test application crashes. Document power-loss guarantees separately; do not imply them from process-crash tests.
 
 ### File output and integrity
@@ -209,14 +212,14 @@ Go offers offset-based writes through [File.WriteAt](https://pkg.go.dev/os#File.
 
 - [x] Set the project name to FluxGet and module path to github.com/Parsania80/FluxGet.
 - [x] Establish the Go 1.26 baseline; operator toolchain is Go 1.26.8.
-- [ ] Choose the license.
-- [ ] Select supported OS/architecture pairs for the first release.
-- [ ] Choose a primary development OS; allow normal development on both Linux and Windows.
+- [x] Choose the MIT License; see LICENSE for the license text.
+- [x] Select Linux/amd64 as the first release target; consider ARM64 and other operating systems after native testing.
+- [x] Use Linux as the primary development OS while keeping shared code portable for Windows and macOS.
 - [ ] Finalize CLI interaction, startup recovery, pause, cancel, retry, and overwrite behavior.
-- [ ] Select the metadata format and define how it is updated safely.
+- [x] Select versioned JSON job metadata and define checkpoint update ordering; implement and test the design during persistence work.
 - [ ] Define the initial job lifecycle and the owner of each mutable state field.
-- [ ] Set initial active-job, worker, buffer, timeout, and retry limits.
-- [ ] Define redirect, unsupported-validator, and unsupported-range policies.
+- [ ] Set initial active-job, worker, buffer, timeout, and retry limits; implement and test the chosen concurrency controls and resolve the remaining proposed values in the relevant phases.
+- [ ] Define redirect, unsupported-validator, and unsupported-range policies. Reject HTTPS-to-HTTP redirects; the current prototype allows up to nine redirects. Unsupported-validator and unsupported-range details remain open.
 - [ ] Record application-crash guarantees and exclusions.
 - [ ] Write the first acceptance scenarios before implementing their features.
 
@@ -228,9 +231,50 @@ Go offers offset-based writes through [File.WriteAt](https://pkg.go.dev/os#File.
 | Embedded SQLite | Transactions and structured queries | Requires schema management and a Go driver choice with packaging implications |
 | Another local store | May satisfy a particular demonstrated requirement | Requires justification and a comparison against the simpler options |
 
-No storage library or GUI framework has been selected by this roadmap.
+Versioned JSON is selected for the first implementation; no external storage library or GUI framework has been selected.
+
+### Selected metadata and checkpoint design
+
+- Keep one versioned JSON record per job in a FluxGet-managed directory under the operating system's user configuration directory. Store job identity, source URL, destination and partial-file identity, state, representation validator, total size when known, and validated completed ranges. Do not store authentication secrets; credential-bearing workflows are outside v0.1.
+- Allow only one active owner of a job and its partial file. Validate the format version, paths, file identity, saved ranges, and remote representation before trusting saved work. Unsupported or corrupt records require attention rather than silent reuse or deletion.
+- Before recording completed bytes, stop or coordinate the relevant writers and synchronize the partial file. Write the new JSON to a separate temporary file in the metadata directory, synchronize and close it, then atomically replace the previous record using a mechanism verified on the target platform. If an update fails, report it and keep the last valid checkpoint when possible.
+- On restart, recover only complete, validated records and safely saved bytes; ignore incomplete temporary updates. A crash may lose progress since the last checkpoint, which can be downloaded again. Do not claim power-loss durability until file and directory synchronization guarantees are specified and tested.
+- The sequential Linux flow saves checkpoints approximately every 1 MiB and on eligible transfer errors, validating the local prefix and both the remote probe and the actual resumed range response. Before final publication, it saves a completed-file digest and state; explicit `-resume` verifies and reconciles the file and any same-inode partial name. A crash before the first checkpoint may leave an unresumable partial file; older checkpoints without the completed state cannot be reconciled automatically. Parallel ranges, non-Linux locking and metadata replacement, startup-wide reconciliation, and power-loss durability remain to be implemented and tested.
 
 **Done when:** Initial decisions are recorded and the sequential transfer implementation has a clear contract.
+
+### Initial resource limits
+
+These are design targets, not guarantees of current implementation. The concurrency controls below are selected; other numeric values are initial proposals to revisit with measurements and user feedback.
+
+| Resource | Initial default | Scope |
+| --- | --- | --- |
+| Active downloads | 5 | User-configurable simultaneous job limit; additional jobs wait in the queue. Users can choose 10 or another supported value. |
+| Workers | 4 per active job | User-configurable default maximum connections per file, with a per-download override. Sequential jobs use one worker. Actual concurrency depends on range support and file size. |
+| Transfer buffer | 32 KiB per worker | Bound per-worker copy buffering; this is not a cap on total process memory. |
+| Connection timeout | 10 seconds | Time allowed to establish a network connection. |
+| TLS handshake timeout | 10 seconds | Time allowed for each TLS handshake. |
+| Response-header timeout | 30 seconds | Wait for response headers after the request is sent. |
+| Read inactivity timeout | 60 seconds | Abort a transfer if no response-body bytes arrive for this interval; no fixed limit on the total download duration. |
+| Retries | 3 retries after the initial attempt | Retry transient failures only, with cancelable exponential delays of 1, 2, and 4 seconds; permanent failures are not retried. |
+
+These limits are future implementation targets. Retrying partial work still requires representation validation and the applicable resume safety rules; no retry may silently append bytes from an unverified representation. Retry guidance and remaining redirect policy details are separate Phase 0 decisions.
+
+The active-download limit and per-file worker limit are independent: changing one does not change the other. Both accept validated positive values; their implementation must enforce finite safety bounds, with exact bounds and server-specific connection policy to be decided before implementing the controls. Unsupported ranges or unsafe representation identity fall back to a single fresh sequential transfer.
+
+### Pause, resume, cancel, and restart behavior
+
+These are v0.1 design decisions for the future persistent queue. The current prototype supports only explicit sequential resume; the remaining queue lifecycle is not implemented.
+
+| Action | Intended behavior |
+| --- | --- |
+| Pause | Stop scheduling work for the job, cancel active requests, wait for writers to finish, then save a consistent checkpoint. Show paused only after this succeeds; report checkpoint failures without claiming a safe pause. Preserve the partial file. |
+| Resume | Revalidate the remote representation and local partial file before reusing saved bytes. Queue the job subject to concurrency limits. Resume only with supported ranges and a suitable strong validator; otherwise explain that a fresh download is needed. |
+| Cancel | Stop requests and wait for writers. Keep the partial file by default; provide an explicit option to remove it. Remove only partial data known to belong to the job, never an existing final destination. A canceled job is not automatically resumed. |
+| Restart application | Reload saved jobs without automatically starting transfers. Restore jobs interrupted while active as paused or as needing attention if recovery validation fails; keep completed, failed, and canceled states visible. The user explicitly resumes or starts queued work. |
+| Fresh restart of a job | If saved bytes cannot be safely reused, require an explicit fresh-start action. Preserve existing partial data unless the user explicitly chooses its removal, and never overwrite an existing destination. |
+
+After an application crash, recovery may re-download work since the last safe checkpoint but must never treat incomplete bytes as complete. Power-loss durability is not promised until its separate contract and tests are defined. Full checkpoint integration and CLI commands remain to be decided.
 
 ## 8. Phase 1 - Establish the Go foundation
 
@@ -256,7 +300,7 @@ No storage library or GUI framework has been selected by this roadmap.
 - [x] Handle redirects, TLS errors, unsuccessful statuses, and network cancellation.
 - [x] Support known and unknown response lengths.
 - [x] Report downloaded bytes, speed, and useful progress.
-- [ ] Handle partial writes, full disks, permissions, and existing destinations.
+- [x] Handle partial writes, full disks, permissions, and existing destinations; Linux failure scenarios are tested, with additional platforms and crash points still pending.
 - [x] Add optional expected SHA-256 verification.
 - [x] Publish the final file only after successful completion and required verification.
 - [x] Test empty files, binary files, interrupted bodies, and incorrect declared lengths.
@@ -314,7 +358,7 @@ No storage library or GUI framework has been selected by this roadmap.
 
 ## 13. Phase 6 - Verify cross-platform behavior
 
-**Goal:** Support the same product behavior across Linux, Windows, and macOS.
+**Goal:** Verify Linux for the first release, then establish the same product behavior on Windows and macOS through native testing.
 
 - [ ] Use the same repository, Go toolchain version, and dependency versions on development machines.
 - [ ] Commit go.mod and go.sum; keep local state and generated downloads out of Git.
@@ -330,7 +374,7 @@ Go recognizes platform-specific source names such as bind_linux.go, bind_windows
 
 Cross-compilation creates a target executable; it does not verify runtime behavior. WSL-based tests exercise Linux behavior and do not replace native Windows tests. Dependencies using cgo may need additional target build tools; evaluate this before selecting storage or GUI libraries. See [cgo documentation](https://pkg.go.dev/cmd/cgo).
 
-**Done when:** The support matrix states actual build and runtime evidence rather than only intended support.
+**Done when:** Linux release targets have native evidence and the support matrix distinguishes later Windows and macOS targets from verified support.
 
 ## 14. Phase 7 - Validate and release v0.1
 
@@ -433,6 +477,6 @@ Prefer evidence over broad claims. Show reproducible scenarios, failure handling
 
 ## 18. Immediate next work
 
-Finish the remaining Phase 0 choices: license, supported targets, metadata approach, and initial resource limits. Walk through and verify the existing sequential downloader before adding parallelism and recovery.
+Finish the remaining Phase 0 choices: supported targets, metadata approach, and initial resource limits. Walk through and verify the existing sequential downloader before adding parallelism and recovery.
 
 Use the same codebase on Linux and Windows and introduce native CI early. Keep multi-interface adapters and GUI work behind their later milestone gates.

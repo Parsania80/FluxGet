@@ -21,8 +21,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	rawURL := flags.String("url", "", "Public HTTP or HTTPS file URL")
 	destination := flags.String("out", "", "Destination file (must not already exist)")
 	checksum := flags.String("sha256", "", "Expected SHA-256 checksum (optional)")
+	resume := flags.Bool("resume", false, "Resume a safely checkpointed download")
 	flags.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: fluxget -url URL -out FILE")
+		fmt.Fprintln(stderr, "Usage: fluxget -url URL -out FILE | fluxget -resume -out FILE")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -31,8 +32,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		return 2
 	}
-	if *rawURL == "" || *destination == "" || flags.NArg() != 0 {
-		fmt.Fprintln(stderr, "Provide both -url and -out, without positional arguments.")
+	if *destination == "" || (!*resume && *rawURL == "") || (*resume && *rawURL != "") || flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "Provide -out and either -url for a new download or -resume for a saved download.")
 		flags.Usage()
 		return 2
 	}
@@ -41,7 +42,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	written, err := download(ctx, &http.Client{}, *rawURL, *destination, *checksum, stderr)
+	var written int64
+	var err error
+	if *resume {
+		written, err = resumeDownload(ctx, &http.Client{}, *destination, *checksum, stderr)
+	} else {
+		written, err = download(ctx, &http.Client{}, *rawURL, *destination, *checksum, stderr)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "Download failed after %d bytes: %v\n", written, err)
 		return 1

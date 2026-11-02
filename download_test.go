@@ -98,6 +98,43 @@ func TestDownloadRedirectAndTLS(t *testing.T) {
 	requireMissing(t, failedDestination+".part")
 }
 
+func TestDownloadRejectsHTTPSDowngrade(t *testing.T) {
+	reached := false
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+		w.Write([]byte("insecure"))
+	}))
+	t.Cleanup(target.Close)
+	redirect := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	t.Cleanup(redirect.Close)
+	destination := filepath.Join(t.TempDir(), "file")
+	_, err := download(context.Background(), redirect.Client(), redirect.URL, destination, "", nil)
+	if err == nil || !strings.Contains(err.Error(), "HTTPS to HTTP redirects are not allowed") {
+		t.Fatalf("expected downgrade rejection, got %v", err)
+	}
+	if reached {
+		t.Fatal("insecure redirect target was contacted")
+	}
+	requireMissing(t, destination)
+	requireMissing(t, destination+".part")
+}
+
+func TestDownloadRedirectLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, r.URL.String(), http.StatusFound)
+	}))
+	t.Cleanup(server.Close)
+	destination := filepath.Join(t.TempDir(), "file")
+	_, err := download(context.Background(), server.Client(), server.URL, destination, "", nil)
+	if err == nil || !strings.Contains(err.Error(), "stopped after 10 redirects") {
+		t.Fatalf("expected redirect limit, got %v", err)
+	}
+	requireMissing(t, destination)
+	requireMissing(t, destination+".part")
+}
+
 func TestRunChecksum(t *testing.T) {
 	payload := []byte("CLI checksum")
 	sum := sha256.Sum256(payload)

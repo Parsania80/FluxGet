@@ -10,12 +10,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
 
-// download performs one sequential transfer. It does not retry or resume yet.
-// Partial output is retained on failure, but is not proof of resumability.
+// download performs one sequential transfer and retains partial output on failure.
 func download(ctx context.Context, client *http.Client, rawURL, destination, expectedSHA256 string, progress io.Writer) (int64, error) {
 	if ctx == nil || client == nil {
 		return 0, errors.New("a context and HTTP client are required")
@@ -52,7 +53,7 @@ func download(ctx context.Context, client *http.Client, rawURL, destination, exp
 		return 0, fmt.Errorf("prepare request: %w", err)
 	}
 	req.Header.Set("Accept-Encoding", "identity")
-	response, err := client.Do(req)
+	response, err := safeHTTPClient(client).Do(req)
 	if err != nil {
 		// Avoid repeating the request URL in errors; query strings can be sensitive.
 		var requestError *url.Error
@@ -66,7 +67,7 @@ func download(ctx context.Context, client *http.Client, rawURL, destination, exp
 		return 0, fmt.Errorf("server returned HTTP %d; expected 200", response.StatusCode)
 	}
 	encoding := response.Header.Get("Content-Encoding")
-	if encoding != "" && !strings.EqualFold(encoding, "identity") {
+	if len(response.Header.Values("Content-Encoding")) > 1 || (encoding != "" && !strings.EqualFold(encoding, "identity")) {
 		return 0, errors.New("server returned unsupported content encoding")
 	}
 	if err := ctx.Err(); err != nil {
@@ -74,7 +75,7 @@ func download(ctx context.Context, client *http.Client, rawURL, destination, exp
 	}
 
 	// Exclusive creation also protects an existing partial file from truncation.
-	partial, err := os.OpenFile(partialPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	partial, err := os.OpenFile(partialPath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return 0, fmt.Errorf("create partial file: %w", err)
 	}
@@ -84,27 +85,62 @@ func download(ctx context.Context, client *http.Client, rawURL, destination, exp
 			partial.Close()
 		}
 	}()
+	var saved *checkpoint
+	var checkpointPath string
+	var ownership *jobLock
+	if runtime.GOOS == "linux" && response.Request != nil && response.Request.URL != nil {
+		checkpointPath, err = checkpointLocation(destination)
+		if err != nil {
+			return 0, fmt.Errorf("prepare recovery metadata; partial file kept: %w", err)
+		}
+		ownership, err = lockJob(checkpointPath+".lock", partial)
+		if err != nil {
+			return 0, fmt.Errorf("lock download; partial file kept: %w", err)
+		}
+		defer ownership.Close()
+		if err := requireAbsent(checkpointPath); err != nil {
+			return 0, fmt.Errorf("existing recovery metadata; partial file kept: %w", err)
+		}
+		absoluteDestination, err := filepath.Abs(destination)
+		if err != nil {
+			return 0, err
+		}
+		saved = &checkpoint{Version: 1, URL: rawURL, ResolvedURL: response.Request.URL.String(), Destination: absoluteDestination, Partial: absoluteDestination + ".part", ExpectedSHA256: expectedSHA256}
+		if response.ContentLength > 0 && len(response.Header.Values("ETag")) == 1 && strongETag(response.Header.Get("ETag")) {
+			total := response.ContentLength
+			saved.Total = &total
+			saved.ETag = response.Header.Get("ETag")
+		}
+	}
 
 	// Copy streams through bounded buffering rather than retaining the whole file.
 	hash := sha256.New()
 	tracker := &progressWriter{writer: io.MultiWriter(partial, hash), output: progress, total: response.ContentLength, start: time.Now()}
+	if saved != nil && saved.Total != nil {
+		tracker.checkpoint = checkpointProgress(checkpointPath, partial, saved, hash, 0)
+	}
 	tracker.report()
 	written, err := io.Copy(tracker, response.Body)
 	tracker.report()
 	if err != nil {
-		return written, fmt.Errorf("transfer failed; partial data kept at %q: %w", partialPath, err)
+		return written, errors.Join(fmt.Errorf("transfer failed; partial data kept at %q: %w", partialPath, err), saveInterrupted(checkpointPath, partial, saved, written))
 	}
 	if response.ContentLength >= 0 && written != response.ContentLength {
-		return written, fmt.Errorf("incomplete response; partial data kept at %q: %w", partialPath, io.ErrUnexpectedEOF)
+		return written, errors.Join(fmt.Errorf("incomplete response; partial data kept at %q: %w", partialPath, io.ErrUnexpectedEOF), saveInterrupted(checkpointPath, partial, saved, written))
 	}
 	if err := ctx.Err(); err != nil {
-		return written, fmt.Errorf("download canceled; partial data kept at %q: %w", partialPath, err)
+		return written, errors.Join(fmt.Errorf("download canceled; partial data kept at %q: %w", partialPath, err), saveInterrupted(checkpointPath, partial, saved, written))
 	}
 	if expected != nil && !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), expectedSHA256) {
 		return written, fmt.Errorf("SHA-256 mismatch; partial data kept at %q", partialPath)
 	}
 	if err := partial.Sync(); err != nil {
 		return written, fmt.Errorf("sync partial file %q: %w", partialPath, err)
+	}
+	if saved != nil {
+		if err := saveReadyCheckpoint(checkpointPath, partial, saved, written, hash); err != nil {
+			return written, err
+		}
 	}
 	err = partial.Close()
 	closed = true
@@ -115,30 +151,74 @@ func download(ctx context.Context, client *http.Client, rawURL, destination, exp
 		return written, fmt.Errorf("download canceled; partial data kept at %q: %w", partialPath, err)
 	}
 
-	// Link publishes the completed data without replacing a destination that
-	// appeared during the transfer. Both names are in the same directory.
-	// Unsupported filesystems fail safely, leaving the partial file intact.
-	if err := os.Link(partialPath, destination); err != nil {
-		return written, fmt.Errorf("publish file; partial data kept at %q: %w", partialPath, err)
+	if err := publishFile(partialPath, destination, nil); err != nil {
+		return written, err
 	}
-	if err := os.Remove(partialPath); err != nil {
-		return written, fmt.Errorf("file completed at %q, but partial-file cleanup failed: %w", destination, err)
+	if saved != nil {
+		if err := os.Remove(checkpointPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return written, fmt.Errorf("file completed at %q, but checkpoint cleanup failed: %w", destination, err)
+		}
 	}
 	return written, nil
 }
 
+// publishFile uses a hard link so an existing destination is never replaced.
+func publishFile(partial, destination string, hook func(string)) error {
+	if hook != nil {
+		hook("before-link")
+	}
+	if err := os.Link(partial, destination); err != nil {
+		return fmt.Errorf("publish file; partial data kept at %q: %w", partial, err)
+	}
+	if hook != nil {
+		hook("after-link")
+	}
+	if err := os.Remove(partial); err != nil {
+		return fmt.Errorf("file completed at %q, but partial-file cleanup failed: %w", destination, err)
+	}
+	if hook != nil {
+		hook("after-partial-removal")
+	}
+	return nil
+}
+
+func safeHTTPClient(client *http.Client) *http.Client {
+	redirectClient := *client
+	redirectClient.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		if (next.URL.Scheme != "http" && next.URL.Scheme != "https") || next.URL.Hostname() == "" || next.URL.User != nil {
+			return errors.New("redirect URL must be HTTP or HTTPS without credentials")
+		}
+		if via[len(via)-1].URL.Scheme == "https" && next.URL.Scheme != "https" {
+			return errors.New("HTTPS to HTTP redirects are not allowed")
+		}
+		if client.CheckRedirect != nil {
+			return client.CheckRedirect(next, via)
+		}
+		return nil
+	}
+	return &redirectClient
+}
+
 type progressWriter struct {
-	writer  io.Writer
-	output  io.Writer
-	total   int64
-	written int64
-	start   time.Time
-	last    time.Time
+	writer       io.Writer
+	output       io.Writer
+	total        int64
+	written      int64
+	startWritten int64
+	start        time.Time
+	last         time.Time
+	checkpoint   func(int64) error
 }
 
 func (p *progressWriter) Write(data []byte) (int, error) {
 	n, err := p.writer.Write(data)
 	p.written += int64(n)
+	if err == nil && p.checkpoint != nil {
+		err = p.checkpoint(p.written)
+	}
 	if time.Since(p.last) >= time.Second {
 		p.report()
 	}
@@ -150,7 +230,7 @@ func (p *progressWriter) report() {
 		return
 	}
 	p.last = time.Now()
-	speed := float64(p.written) / p.last.Sub(p.start).Seconds()
+	speed := float64(p.written-p.startWritten) / p.last.Sub(p.start).Seconds()
 	if p.total > 0 {
 		fmt.Fprintf(p.output, "Downloaded %d/%d bytes (%.1f%%), %.0f bytes/s\n", p.written, p.total, float64(p.written)*100/float64(p.total), speed)
 	} else {
