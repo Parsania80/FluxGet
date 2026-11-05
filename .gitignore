@@ -11,3 +11,4 @@
 /fluxget
 /fluxget.exe
 *.part
+/dist/

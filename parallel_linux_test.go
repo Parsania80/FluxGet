@@ -73,6 +73,30 @@ func TestParallelDownloadAndBoundedWorkers(t *testing.T) {
 	requireMissing(t, dest+".part")
 }
 
+func TestParallelServerFilename(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	payload := bytes.Repeat([]byte("a"), minParallelSize+1)
+	var ranges atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") != "" {
+			ranges.Add(1)
+		}
+		w.Header().Set("ETag", `"v1"`)
+		w.Header().Set("Content-Disposition", `attachment; filename="parallel.bin"`)
+		http.ServeContent(w, r, "file", time.Time{}, bytes.NewReader(payload))
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	var out, stderr bytes.Buffer
+	if code := run([]string{"-url", server.URL + "/endpoint", "-dir", dir, "-connections", "4"}, &out, &stderr); code != 0 {
+		t.Fatalf("download failed: %s", stderr.String())
+	}
+	requireContents(t, filepath.Join(dir, "parallel.bin"), payload)
+	if ranges.Load() != 5 {
+		t.Fatalf("got %d range requests, want probe plus four workers", ranges.Load())
+	}
+}
+
 func TestParallelFallback(t *testing.T) {
 	for _, mode := range []string{"ignored", "weak", "small"} {
 		t.Run(mode, func(t *testing.T) {

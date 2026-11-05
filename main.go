@@ -6,8 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"time"
 )
 
@@ -20,6 +22,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 	rawURL := flags.String("url", "", "Public HTTP or HTTPS file URL")
 	destination := flags.String("out", "", "Destination file (must not already exist)")
+	directory := flags.String("dir", "", "Download directory (default: Downloads)")
+	name := flags.String("name", "", "Download filename (default: server or URL filename)")
 	checksum := flags.String("sha256", "", "Expected SHA-256 checksum (optional)")
 	resume := flags.Bool("resume", false, "Resume a safely checkpointed download")
 	list := flags.Bool("list", false, "List saved download jobs")
@@ -27,7 +31,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	maxActive := flags.Int("max-active", 5, "Maximum simultaneous queue downloads (1–64)")
 	connections := flags.Int("connections", 4, "Maximum connections per download (1–16)")
 	flags.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: fluxget -url URL -out FILE | fluxget -resume -out FILE | fluxget -list | fluxget -queue [-max-active N]")
+		fmt.Fprintln(stderr, "Usage: fluxget -url URL [-dir DIR] [-name NAME] | fluxget -resume -out FILE | fluxget -list | fluxget -queue [-max-active N]")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -41,7 +45,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *queue {
-		if *list || *resume || *rawURL != "" || *destination != "" || *checksum != "" || flags.NArg() != 0 || *maxActive < 1 || *maxActive > 64 {
+		if *list || *resume || *rawURL != "" || *destination != "" || *directory != "" || *name != "" || *checksum != "" || flags.NArg() != 0 || *maxActive < 1 || *maxActive > 64 {
 			fmt.Fprintln(stderr, "Use -queue alone, optionally with -max-active from 1 to 64.")
 			return 2
 		}
@@ -57,17 +61,26 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "-max-active requires -queue.")
 		return 2
 	}
-	if *list && *rawURL == "" && *destination == "" && *checksum == "" && !*resume && flags.NArg() == 0 {
+	if *list && *rawURL == "" && *destination == "" && *directory == "" && *name == "" && *checksum == "" && !*resume && flags.NArg() == 0 {
 		if err := listJobs(stdout); err != nil {
 			fmt.Fprintf(stderr, "List failed: %v\n", err)
 			return 1
 		}
 		return 0
 	}
-	if *list || *destination == "" || (!*resume && *rawURL == "") || (*resume && *rawURL != "") || flags.NArg() != 0 {
-		fmt.Fprintln(stderr, "Use -list alone, or provide -out and either -url for a new download or -resume for a saved download.")
+	if *list || (!*resume && *rawURL == "") || (*resume && (*rawURL != "" || *destination == "" || *directory != "" || *name != "")) || (*destination != "" && (*directory != "" || *name != "")) || flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "Use -list alone, or provide either -url for a new download or -resume with -out for a saved download; -out cannot be combined with -dir or -name.")
 		flags.Usage()
 		return 2
+	}
+	pendingName := !*resume && *destination == "" && *name == ""
+	if !*resume && *destination == "" {
+		path, err := defaultDestination(*rawURL, *directory, *name)
+		if err != nil {
+			fmt.Fprintf(stderr, "Choose destination: %v\n", err)
+			return 2
+		}
+		*destination = path
 	}
 
 	// Ctrl+C cancels the request and lets the download function close its files.
@@ -83,8 +96,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 		var attemptErr error
 		if *resume {
 			n, attemptErr = resumeDownloadWithLimit(ctx, client, *destination, *checksum, stderr, *connections)
-		} else if first {
-			n, attemptErr = downloadFresh(ctx, client, *rawURL, *destination, *checksum, stderr, *connections)
+		} else if first || pendingName {
+			var resolve func(http.Header)
+			if pendingName {
+				resolve = func(header http.Header) {
+					if filename := serverFilename(header); filename != "" {
+						*destination = filepath.Join(filepath.Dir(*destination), filename)
+					}
+					pendingName = false
+				}
+			}
+			n, attemptErr = downloadFreshNamed(ctx, client, *rawURL, destination, *checksum, stderr, *connections, resolve)
 		} else {
 			n, attemptErr = runDownloadAttempt(ctx, client, queueJob{URL: *rawURL, Destination: *destination}, *checksum, stderr, *connections)
 		}

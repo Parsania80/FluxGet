@@ -35,7 +35,7 @@ The application is local software. A hosted server, user accounts, PostgreSQL cl
 
 - The learner approved the first four files: go.mod, main.go, download.go, and download_test.go.
 - The project is FluxGet and the Go module is github.com/Parsania80/FluxGet, matching the GitHub repository. The Go baseline is 1.26; the operator has verified Go 1.26.8 on linux/amd64.
-- Build the CLI as fluxget with go build -o fluxget . (use fluxget.exe on Windows).
+- Build the CLI as fluxget with go build -o fluxget . (use fluxget.exe on Windows). New standalone downloads default to the Linux Downloads directory and a safe server-supplied filename or URL fallback; users can override the directory, name, or full output path.
 - The CLI accepts -url and -out plus optional -sha256. It streams a sequential response or validated parallel ranges to an exclusively created destination.part file, reports progress, supports Ctrl+C cancellation, rejects invalid responses, and preserves partial bytes on transfer failure or checksum mismatch.
 - Successful output is published through a same-directory hard link, then the partial name is removed. Existing destinations and partial files are refused. Filesystems without hard-link support fail safely with the partial file retained; no portable rename-overwrite guarantee is assumed.
 - Automated tests cover binary and empty files, unknown length, redirects and TLS, progress, checksums, HTTP errors, truncated responses, partial writes, disk-full and permission failures, checkpoint update failure and recovery, existing files, destination-creation races, and cancellation. They pass on Linux with Go 1.26.8.
@@ -293,7 +293,7 @@ After an application crash, recovery may re-download work since the last safe ch
 - [ ] Add validated configuration and consistent error types.
 - [ ] Use cancellation contexts for jobs and application shutdown.
 - [ ] Establish structured diagnostic logging and a separate progress output path.
-- [ ] Add formatting, static checks, and automated tests in CI. A GitHub Actions workflow is configured; its first hosted run remains to be verified.
+- [x] Add formatting, static checks, and automated tests in CI. The first hosted GitHub Actions run passed on 2026-11-05 for commit `c972c54`.
 - [ ] Create a deterministic local HTTP test server.
 - [ ] Document development setup on Linux and Windows.
 
@@ -402,9 +402,9 @@ Cross-compilation creates a target executable; it does not verify runtime behavi
 | Conflicting writers | Automated: `TestJobLockExclusiveAcrossProcesses` and destination-conflict tests. |
 | Unknown-size transfer | Automated: `TestDownloadUnknownLength` verifies output and progress without a percentage. |
 | Resource limits | Partial: queue and connection limits are tested; [recorded measurements](BENCHMARKS.md) cover individual and queued jobs, ext4/tmpfs, and a throttled local server, but do not prove general bounds. |
-| Native platforms | Partial: built CLI smoke tests passed locally on Ubuntu 26.04.1 Linux/amd64 with Go 1.26.8, including a real internet download to ext4; packaged release and other environment tests remain open. Windows and macOS cross-builds do not verify runtime behavior. |
+| Native platforms | Partial: built CLI and extracted release-candidate smoke tests passed locally on Ubuntu 26.04.1 Linux/amd64 with Go 1.26.8, including a real internet download to ext4; other environment tests remain open. Windows and macOS cross-builds do not verify runtime behavior. |
 
-The local Linux acceptance suite passed on 2026-11-05 with no skips. On the same date, a locally built `go build -trimpath` Linux/amd64 binary downloaded the Go 1.24.0 source archive from GitHub to ext4 (30,902,662 bytes, 14.63 seconds); its SHA-256 `4f47402534b970bcf9f92a7af40de20f77ed7c1a295c5aec650b0f1e52c5e026` matched an independent curl download. This is a consistency check, not a publisher-signed checksum or a packaged-release test; the transfer does not establish parallel range or resume behavior. The GitHub API reported zero Actions runs, and the workflow remains untracked locally. Full v0.1 acceptance remains open, including hosted CI, broader resource bounds, packaged release testing, and the remaining roadmap requirements.
+The local Linux acceptance suite passed on 2026-11-05 with no skips. On the same date, a locally built `go build -trimpath` Linux/amd64 binary downloaded the Go 1.24.0 source archive from GitHub to ext4 (30,902,662 bytes, 14.63 seconds); its SHA-256 `4f47402534b970bcf9f92a7af40de20f77ed7c1a295c5aec650b0f1e52c5e026` matched an independent curl download. This is a consistency check, not a publisher-signed checksum or a packaged-release test; the transfer does not establish parallel range or resume behavior. The first hosted CI run passed for commit `c972c54`. Full v0.1 acceptance remains open, including broader resource bounds, packaged release testing, and the remaining roadmap requirements.
 
 ### Release tasks
 
@@ -415,7 +415,7 @@ The local Linux acceptance suite passed on 2026-11-05 with no skips. On the same
 - [ ] Write a README with setup, usage, architecture, limitations, and recovery instructions.
 - [ ] Record tested environments, dependency versions, and benchmark conditions.
 - [ ] Create a short demonstration of interruption and successful recovery.
-- [ ] Package release artifacts and document checksums and build instructions.
+- [ ] Package release artifacts and document checksums and build instructions. A local Linux/amd64 candidate for `c972c54` was packaged and smoke-tested; publication and final release artifacts remain open.
 - [ ] Review license, dependency obligations, and contribution guidance.
 
 **Done when:** A new user can run the documented workflow, reproduce the key tests, and understand the first release's limitations.

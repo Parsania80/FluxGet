@@ -23,6 +23,7 @@ const minParallelSize = 1 << 20
 type representation struct {
 	url, etag string
 	size      int64
+	header    http.Header
 }
 
 // A probe is only an optimization; unsupported servers use the sequential path.
@@ -64,12 +65,17 @@ func probeParallel(ctx context.Context, client *http.Client, rawURL string) (rep
 	if len(b) != 1 {
 		return representation{}, false, nil
 	}
-	return representation{url: response.Request.URL.String(), etag: response.Header.Get("ETag"), size: size}, true, nil
+	return representation{url: response.Request.URL.String(), etag: response.Header.Get("ETag"), size: size, header: response.Header}, true, nil
 }
 
 func downloadFresh(ctx context.Context, client *http.Client, rawURL, destination, checksum string, progress io.Writer, connections int) (int64, error) {
+	return downloadFreshNamed(ctx, client, rawURL, &destination, checksum, progress, connections, nil)
+}
+
+func downloadFreshNamed(ctx context.Context, client *http.Client, rawURL string, destinationPtr *string, checksum string, progress io.Writer, connections int, resolve func(http.Header)) (int64, error) {
+	destination := *destinationPtr
 	if connections <= 1 || runtime.GOOS != "linux" {
-		return download(ctx, client, rawURL, destination, checksum, progress)
+		return downloadNamed(ctx, client, rawURL, destinationPtr, checksum, progress, resolve)
 	}
 	if ctx == nil || client == nil {
 		return 0, errors.New("a context and HTTP client are required")
@@ -89,9 +95,11 @@ func downloadFresh(ctx context.Context, client *http.Client, rawURL, destination
 			return 0, errors.New("SHA-256 must be 64 hexadecimal characters")
 		}
 	}
-	for _, path := range []string{destination, destination + ".part"} {
-		if err := requireAbsent(path); err != nil {
-			return 0, err
+	if resolve == nil {
+		for _, path := range []string{destination, destination + ".part"} {
+			if err := requireAbsent(path); err != nil {
+				return 0, err
+			}
 		}
 	}
 	rep, ok, err := probeParallel(ctx, client, rawURL)
@@ -99,7 +107,16 @@ func downloadFresh(ctx context.Context, client *http.Client, rawURL, destination
 		return 0, err
 	}
 	if !ok {
-		return download(ctx, client, rawURL, destination, checksum, progress)
+		return downloadNamed(ctx, client, rawURL, destinationPtr, checksum, progress, resolve)
+	}
+	if resolve != nil {
+		resolve(rep.header)
+		destination = *destinationPtr
+		for _, path := range []string{destination, destination + ".part"} {
+			if err := requireAbsent(path); err != nil {
+				return 0, err
+			}
+		}
 	}
 	return parallelDownload(ctx, client, rawURL, destination, checksum, progress, connections, rep)
 }

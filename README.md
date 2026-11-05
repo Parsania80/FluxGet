@@ -5,7 +5,7 @@ The long-term goal is an IDM-like download manager, starting with a reliable Lin
 
 **Status:** Early CLI prototype. Sequential and parallel range downloads are implemented on Linux. One live download has been reported successful on Ubuntu; automated checks passed on Linux with Go 1.26.8. Native testing on other operating systems is still pending.
 
-The next development step is to verify the first hosted CI run and complete the remaining v0.1 release checks. Local formatting, vet, race tests, and Linux/Windows/macOS builds passed. A local Linux/amd64 build has downloaded and verified a real 30.9 MB file over the internet to ext4; see the roadmap for the test's limits.
+The first hosted CI run passed formatting, vet, race tests, and Linux/Windows/macOS builds. A local Linux/amd64 build has downloaded and verified a real 30.9 MB file over the internet to ext4; see the roadmap for the test's limits.
 The queue enforces an active-download limit; downloads also use bounded timeouts and retries. Other planned resource limits are documented in the roadmap.
 An active-download limit concerns simultaneous transfers, not the number of files a user can add to a queue.
 The queue defaults to five simultaneous downloads and supports a configurable limit, including ten. Eligible new downloads use up to four connections by default.
@@ -62,12 +62,21 @@ clear
 go run . -url "https://go.dev/dl/?mode=json" -out "go-releases.json"
 ```
 
-New downloads require `-url` and `-out`:
+New downloads only require `-url`. By default FluxGet uses a safe filename supplied by the server and saves it in the configured Linux Downloads folder (or `~/Downloads` if none is configured). It creates that default folder if needed. If the server supplies no usable filename, FluxGet uses the original URL filename; a URL without one uses `download`. Use `-dir` and `-name` to choose a different folder or filename, or use `-out` to specify the full path. An existing destination is never overwritten.
+
+```bash
+go run . -url "https://example.com/archive.zip"
+go run . -url "https://example.com/archive.zip" -dir /path/to/folder -name my-archive.zip
+```
+
+The filename can come from the final response's `Content-Disposition` header, including UTF-8 `filename*`. Names containing path separators or control characters are ignored. For parallel downloads the header must be present in the range-probe response; otherwise the URL filename is used. Explicit `-name` and `-out` always take precedence.
 
 | Flag | Meaning |
 | --- | --- |
 | -url | A direct file URL with an explicit http:// or https:// scheme |
-| -out | The output path; neither that path nor its .part companion may already exist |
+| -out | Optional full output path; cannot be combined with `-dir` or `-name` |
+| -dir | Optional existing output directory; defaults to the Downloads folder |
+| -name | Optional filename; defaults to a safe server-supplied or URL filename |
 | -sha256 | Optional expected SHA-256 checksum as 64 hexadecimal characters |
 | -resume | Resume a checkpointed download using `-out`; do not provide `-url` |
 | -list | List saved jobs; use without other flags |
@@ -116,6 +125,36 @@ Downloads and queue jobs retry selected temporary failures up to three times aft
 
 The same `-resume -out FILE` command can reconcile an interrupted final publication. FluxGet verifies the completed file against its saved publication checkpoint before finishing publication or removing leftover partial metadata. Conflicting or unverifiable files are left untouched. Older checkpoints without a completed-publication record cannot be reconciled automatically.
 Completed-publication reconciliation checks local files and does not need to contact the download server.
+
+## Linux/amd64 release candidate
+
+For testing the automatic-filename changes, use `dist/fluxget-test-20261105-linux-amd64.tar.gz` and verify it with `sha256sum -c fluxget-test-20261105-linux-amd64.sha256` from `dist/`. This local test build is newer than the candidate below.
+
+The local candidate `dist/fluxget-rc-c972c54-linux-amd64.tar.gz` contains the executable and MIT license. It is built from source commit `c972c54` with Go 1.26.8. Its SHA-256 is `fc42389d5e5c5bd084bc96fd5c88a7510ce5f7a8161f153d367f5b8a5f3638e6`. The archive and its `dist/SHA256SUMS` file are generated locally and are not yet published.
+
+To verify and extract the candidate:
+
+```bash
+cd dist
+sha256sum -c SHA256SUMS
+tar -xzf fluxget-rc-c972c54-linux-amd64.tar.gz
+./fluxget -h
+```
+
+To rebuild the same candidate from a clean checkout of commit `c972c54`, using Go 1.26.8, GNU tar, and gzip:
+
+```bash
+work=$(mktemp -d)
+mkdir -p dist
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -o "$work/fluxget" .
+cp LICENSE "$work/LICENSE"
+chmod 755 "$work/fluxget"
+chmod 644 "$work/LICENSE"
+tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf - -C "$work" fluxget LICENSE | gzip -n > dist/fluxget-rc-c972c54-linux-amd64.tar.gz
+(cd dist && sha256sum fluxget-rc-c972c54-linux-amd64.tar.gz > SHA256SUMS && sha256sum -c SHA256SUMS)
+```
+
+The checksum verifies that the archive matches a trusted copy of the checksum; it does not authenticate an independently replaced archive and checksum. Release files in `dist/` are ignored by Git.
 
 ## Build
 
@@ -205,7 +244,7 @@ go test -race ./... &&
 go vet ./...
 ```
 
-The GitHub Actions workflow checks formatting, vet, race-tested Linux behavior, the Linux build, and Windows/macOS cross-builds on pushes and pull requests. It is configured locally; its first hosted run is not yet verified. Cross-builds do not establish native support.
+The GitHub Actions workflow checks formatting, vet, race-tested Linux behavior, the Linux build, and Windows/macOS cross-builds on pushes and pull requests. Its first hosted run passed. Cross-builds do not establish native support.
 
 The tests cover binary and empty files, known and unknown lengths, redirects and TLS, checksums, progress, rejected HTTP statuses, truncated responses, partial writes, existing files, competing destination creation, cancellation, disk-full and permission errors, and failed checkpoint updates. On Linux the disk-full tests use a private 1 MiB tmpfs for both data and checkpoint failures and skip if user or mount namespaces are unavailable; permission tests skip when run as root. The race detector needs a supported platform and a suitable C compiler. Test requests use local servers rather than internet services.
 

@@ -18,6 +18,11 @@ import (
 
 // download performs one sequential transfer and retains partial output on failure.
 func download(ctx context.Context, client *http.Client, rawURL, destination, expectedSHA256 string, progress io.Writer) (int64, error) {
+	return downloadNamed(ctx, client, rawURL, &destination, expectedSHA256, progress, nil)
+}
+
+func downloadNamed(ctx context.Context, client *http.Client, rawURL string, destinationPtr *string, expectedSHA256 string, progress io.Writer, resolve func(http.Header)) (int64, error) {
+	destination := *destinationPtr
 	if ctx == nil || client == nil {
 		return 0, errors.New("a context and HTTP client are required")
 	}
@@ -42,9 +47,11 @@ func download(ctx context.Context, client *http.Client, rawURL, destination, exp
 		}
 	}
 	partialPath := destination + ".part"
-	for _, path := range []string{destination, partialPath} {
-		if err := requireAbsent(path); err != nil {
-			return 0, err
+	if resolve == nil {
+		for _, path := range []string{destination, partialPath} {
+			if err := requireAbsent(path); err != nil {
+				return 0, err
+			}
 		}
 	}
 
@@ -75,6 +82,16 @@ func download(ctx context.Context, client *http.Client, rawURL, destination, exp
 	}
 	if err := ctx.Err(); err != nil {
 		return 0, err
+	}
+	if resolve != nil {
+		resolve(response.Header)
+		destination = *destinationPtr
+		partialPath = destination + ".part"
+		for _, path := range []string{destination, partialPath} {
+			if err := requireAbsent(path); err != nil {
+				return 0, err
+			}
+		}
 	}
 
 	// Exclusive creation also protects an existing partial file from truncation.
