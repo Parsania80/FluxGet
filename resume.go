@@ -169,16 +169,22 @@ func resumeDownloadWithLimit(ctx context.Context, client *http.Client, destinati
 	if _, err := io.CopyN(hash, io.NewSectionReader(partial, 0, c.Completed), c.Completed); err != nil || !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), c.PrefixSHA256) {
 		return 0, errors.New("saved partial file does not match its checkpoint")
 	}
-	if err := validateRemote(ctx, client, c); err != nil {
-		return 0, err
-	}
 	c.ExpectedSHA256 = expectedSHA256
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.URL, nil)
 	if err != nil {
 		return 0, fmt.Errorf("prepare resume request: %w", err)
 	}
-	req.Header.Set("Range", fmt.Sprintf("bytes=%d-", c.Completed))
-	req.Header.Set("If-Range", c.ETag)
+	validatedRange := c.Total != nil && strongETag(c.ETag) && c.ResolvedURL != "" && c.Completed > 0 && c.Completed < *c.Total
+	if c.Completed <= 0 {
+		return 0, errors.New("no saved data is available to resume")
+	}
+	if validatedRange {
+		if err := validateRemote(ctx, client, c); err != nil {
+			return 0, err
+		}
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", c.Completed))
+		req.Header.Set("If-Range", c.ETag)
+	}
 	req.Header.Set("Accept-Encoding", "identity")
 	response, err := safeHTTPClient(client).Do(req)
 	if err != nil {
@@ -192,12 +198,31 @@ func resumeDownloadWithLimit(ctx context.Context, client *http.Client, destinati
 	if err := transientStatus(response); err != nil {
 		return 0, err
 	}
-	if response.Request == nil || response.Request.URL == nil || response.Request.URL.String() != c.ResolvedURL ||
+	if validatedRange && (response.Request == nil || response.Request.URL == nil || response.Request.URL.String() != c.ResolvedURL ||
 		response.StatusCode != http.StatusPartialContent || len(response.Header.Values("ETag")) != 1 || response.Header.Get("ETag") != c.ETag ||
 		len(response.Header.Values("Content-Range")) != 1 || response.Header.Get("Content-Range") != fmt.Sprintf("bytes %d-%d/%d", c.Completed, *c.Total-1, *c.Total) ||
 		len(response.Header.Values("Content-Encoding")) > 1 || (response.Header.Get("Content-Encoding") != "" && !strings.EqualFold(response.Header.Get("Content-Encoding"), "identity")) ||
-		(response.ContentLength >= 0 && response.ContentLength != *c.Total-c.Completed) {
+		(response.ContentLength >= 0 && response.ContentLength != *c.Total-c.Completed)) {
 		return 0, errors.New("resume response does not match saved checkpoint")
+	}
+	if !validatedRange {
+		encoding := response.Header.Get("Content-Encoding")
+		if response.StatusCode != http.StatusOK || response.Request == nil || response.Request.URL == nil || response.ContentLength < c.Completed || len(response.Header.Values("Content-Encoding")) > 1 || (encoding != "" && !strings.EqualFold(encoding, "identity")) {
+			return 0, errors.New("cannot verify saved data against the current response")
+		}
+		if progress != nil {
+			fmt.Fprintf(progress, "Verifying %d saved bytes against the server…\n", c.Completed)
+		}
+		remoteHash := sha256.New()
+		if _, err := io.CopyN(remoteHash, response.Body, c.Completed); err != nil {
+			return 0, fmt.Errorf("verify saved data: %w", err)
+		}
+		if !strings.EqualFold(hex.EncodeToString(remoteHash.Sum(nil)), c.PrefixSHA256) {
+			return 0, errors.New("server data differs from saved partial; all files kept")
+		}
+		total := response.ContentLength
+		c.Total = &total
+		c.ResolvedURL = response.Request.URL.String()
 	}
 	c.Version = 2
 	c.State = "downloading"

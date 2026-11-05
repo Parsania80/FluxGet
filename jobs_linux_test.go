@@ -115,7 +115,7 @@ func TestInterruptedJobStateIsPersistedAndListed(t *testing.T) {
 		t.Fatalf("checkpoint: %+v, %v", c, err)
 	}
 	var output bytes.Buffer
-	if err := listJobs(&output); err != nil || !strings.Contains(output.String(), "interrupted (restart required)\t7/? bytes") {
+	if err := listJobs(&output); err != nil || !strings.Contains(output.String(), "interrupted\t7/100 bytes") {
 		t.Fatalf("listing: %q, %v", output.String(), err)
 	}
 	requireContents(t, destination+".part", []byte("partial"))

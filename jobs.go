@@ -96,7 +96,7 @@ func savedJobState(path string, c checkpoint) string {
 			return "needs-attention"
 		}
 	}
-	if c.Total == nil || c.Completed <= 0 || c.Completed >= *c.Total || !strongETag(c.ETag) || c.ResolvedURL == "" {
+	if c.Completed <= 0 || (c.Total != nil && c.Completed > *c.Total) {
 		return "interrupted (restart required)"
 	}
 	return "interrupted"

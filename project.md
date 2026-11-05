@@ -49,7 +49,7 @@ The application is local software. A hosted server, user accounts, PostgreSQL cl
 - Linux parallel storage tests exercise real data and checkpoint ENOSPC and permission errors during fresh transfers and recovery. They check saved chunks and retry successfully after restoring space or permissions, including through the queue.
 - Queue integration tests kill and restart the queue twice while chunks are saved out of order, inject transient probe and range failures, and verify saved chunks, limits, explicit restart, and backoff cancellation.
 - Linux process-kill tests cover checkpoint data write, sync and publication, plus the points before and after final linking and partial-file removal. A completed-publication checkpoint allows explicit `-resume` to verify and reconcile these final-publication states without overwriting conflicting files.
-- Resume currently requires a known length, strong ETag, unchanged resolved URL, and valid range support. Recovery-window retries and additional platform verification remain future steps.
+- Resume uses validated ranges with a strong ETag, or verifies the saved prefix again against a single known-length response when no strong validator is available. The latter rereads the prefix and does not authenticate content without a trusted checksum. Recovery-window retries and additional platform verification remain future steps.
 - README.md documents the actual prototype, usage, verification commands, and limitations. Local Git metadata now contains commit 195d06bef804. Remote publication has not been verified. The current .gitignore covers debugger binaries and the default debug download.
 - .vscode/launch.json adds an optional Go/Delve launch profile that prompts for a URL and destination. README.md includes breakpoint and stepping instructions. Debugger binaries and the default debug download are ignored; a live debugger session remains unverified.
 
@@ -136,7 +136,7 @@ Platform adapters
 Remote HTTP/HTTPS servers <---- transfer workers
 ```
 
-The initial Fyne desktop app is a separate Go module and starts the existing CLI as a companion process. The CLI remains the sole owner of transfer, checkpoint, and queue behavior; a future shared engine package can replace the process boundary when needed.
+The Fyne desktop app is a separate Go module and starts the existing CLI as a companion process. Its Queue tab connects to the same exclusively owned persistent CLI queue; the separate Downloads tab uses standalone transfers. The CLI remains the sole owner of transfer, checkpoint, and queue behavior; a future shared engine package can replace the process boundary when needed. Desktop speed settings are persisted in a private JSON file that companion processes read during transfers; the default applies per download, individual ceilings may be lower, and the separate queue-wide cap remains available.
 
 ### Responsibilities
 
@@ -174,7 +174,7 @@ These contracts are proposed release requirements. Record their detailed impleme
 ### HTTP and representation handling
 
 - A metadata request is a hint; verify actual download responses.
-- Parallel transfer and resume require a consistent representation and a suitable strong validator.
+- Parallel transfer and range resume require a suitable strong validator. Sequential recovery without one verifies the saved prefix against a single fresh response before appending.
 - Request identity content encoding for range transfers and reject unsupported transformations.
 - Validate status, returned range, total size, validator, and actual byte count before accepting chunk data.
 - A full response must never be written blindly into a chunk offset.
@@ -459,7 +459,7 @@ This feature uses multiple ordinary connections. It does not require one TCP con
 
 ### Desktop GUI (parallel track)
 
-The operator selected a Go desktop app using Fyne on 2026-11-05. The initial single-download UI includes persistent history, checkpoint resume, and explicit duplicate-file choices; queue management remains a CLI feature.
+The operator selected a Go desktop app using Fyne on 2026-11-05. The single-download UI includes persistent history, checkpoint resume, and explicit duplicate-file choices. A separate Queue tab manages the persistent CLI queue with configurable concurrency and per-job controls.
 
 - [ ] Compare a Go GUI toolkit, a web-based desktop shell, and a local browser UI.
 - [ ] Evaluate accessibility, packaging, native dependencies, and maintenance.

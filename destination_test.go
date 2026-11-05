@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -130,5 +131,22 @@ func TestDestinationOverridesAndUnsafeName(t *testing.T) {
 	var out, stderr bytes.Buffer
 	if code := run([]string{"-url", "https://example.com/file", "-out", "file", "-dir", dir}, &out, &stderr); code != 2 || !strings.Contains(stderr.String(), "cannot be combined") {
 		t.Fatalf("conflicting flags: %d, %s", code, stderr.String())
+	}
+}
+
+func TestSuggestOutputUsesURLWithoutDownloading(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var out, stderr bytes.Buffer
+	if code := run([]string{"-suggest-output", "-url", "https://example.com/a%20file.zip?secret=ignored"}, &out, &stderr); code != 0 {
+		t.Fatalf("suggest output: %s", stderr.String())
+	}
+	want := strconv.Quote(filepath.Join(home, "Downloads", "a file.zip")) + "\n"
+	if out.String() != want {
+		t.Fatalf("got %q, want %q", out.String(), want)
+	}
+	if code := run([]string{"-suggest-output", "-queue"}, &out, &stderr); code != 2 {
+		t.Fatalf("invalid combination returned %d", code)
 	}
 }

@@ -167,7 +167,7 @@ func TestRetryResumesValidatedPartial(t *testing.T) {
 	}
 }
 
-func TestRetryKeepsUnresumablePartial(t *testing.T) {
+func TestRetryKeepsPartialWhenServerContinuesToTruncate(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -183,7 +183,7 @@ func TestRetryKeepsUnresumablePartial(t *testing.T) {
 		_, err := runDownloadAttempt(context.Background(), client, queueJob{URL: server.URL, Destination: dest}, "", io.Discard, 1)
 		return err
 	})
-	if err == nil || calls.Load() != 1 {
+	if err == nil || calls.Load() != 4 {
 		t.Fatalf("calls %d: %v", calls.Load(), err)
 	}
 	b, err := os.ReadFile(dest + ".part")

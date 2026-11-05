@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"image/color"
 	"net/url"
 	"os"
@@ -26,6 +27,19 @@ func (t fluxTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) co
 	return t.Theme.Color(name, variant)
 }
 
+func jobVisible(category, state string) bool {
+	switch category {
+	case "All downloads":
+		return true
+	case "Finished":
+		return state == "Completed"
+	case "Unfinished":
+		return state != "Completed"
+	default:
+		return false
+	}
+}
+
 func main() {
 	a := app.NewWithID("io.github.parsania80.fluxget")
 	a.Settings().SetTheme(fluxTheme{theme.DefaultTheme()})
@@ -44,10 +58,17 @@ func main() {
 		w.ShowAndRun()
 		return
 	}
+	settings, err := loadSpeedSettings()
+	if err != nil {
+		w.SetContent(widget.NewLabel("Cannot open speed settings: " + err.Error()))
+		w.ShowAndRun()
+		return
+	}
 	jobs, discoveryErr := discoverSavedJobs(jobs)
 	selected := -1
 	var cancel context.CancelFunc
 	closing := false
+	var finishClose func()
 	link := widget.NewEntry()
 	link.SetPlaceHolder("https://example.com/file.zip")
 	directory := widget.NewEntry()
@@ -55,13 +76,32 @@ func main() {
 	name := widget.NewEntry()
 	name.SetPlaceHolder("Choose automatically")
 	status := widget.NewLabel("Ready when you are.")
-	progress := widget.NewProgressBar()
 	if discoveryErr != nil {
 		status.SetText("Saved downloads could not be checked: " + discoveryErr.Error())
 	}
 	status.Wrapping = fyne.TextWrapWord
 	var list *widget.List
 	var resume *widget.Button
+	var newDownload dialog.Dialog
+	category := "All downloads"
+	visible := func() []int {
+		var indexes []int
+		for i, j := range jobs {
+			if jobVisible(category, j.State) {
+				indexes = append(indexes, i)
+			}
+		}
+		return indexes
+	}
+	selectJob := func(index int) {
+		list.UnselectAll()
+		for row, jobIndex := range visible() {
+			if jobIndex == index {
+				list.Select(row)
+				return
+			}
+		}
+	}
 	refresh := func() {
 		if list != nil {
 			list.Refresh()
@@ -85,10 +125,10 @@ func main() {
 	})
 	pause.SetIcon(theme.MediaPauseIcon())
 	pause.Disable()
-	resume = widget.NewButton("Resume selected", nil)
+	resume = widget.NewButton("Resume", nil)
 	resume.SetIcon(theme.MediaPlayIcon())
 	resume.Disable()
-	open := widget.NewButton("Open selected", func() {
+	open := widget.NewButton("Open file", func() {
 		if selected < 0 || selected >= len(jobs) || jobs[selected].Path == "" {
 			return
 		}
@@ -108,21 +148,39 @@ func main() {
 	})
 	browse.SetIcon(theme.FolderOpenIcon())
 
-	list = widget.NewList(func() int { return len(jobs) }, func() fyne.CanvasObject {
-		return container.NewVBox(widget.NewLabelWithStyle("Filename", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), widget.NewLabel("Status"))
+	list = widget.NewList(func() int { return len(visible()) }, func() fyne.CanvasObject {
+		return container.NewVBox(container.NewBorder(nil, nil, nil, widget.NewButton("Limit: default", nil), container.NewGridWithColumns(2, widget.NewLabel("Filename"), widget.NewLabel("Status"))), progressLine())
 	}, func(id widget.ListItemID, object fyne.CanvasObject) {
 		row := object.(*fyne.Container)
-		j := jobs[id]
+		index := visible()[id]
+		j := jobs[index]
 		label := "Waiting for filename"
 		if j.Path != "" {
 			label = filepath.Base(j.Path)
 		}
-		row.Objects[0].(*widget.Label).SetText(label)
-		row.Objects[1].(*widget.Label).SetText(j.State + "  •  " + j.Message)
+		line := row.Objects[0].(*fyne.Container)
+		columns := line.Objects[0].(*fyne.Container)
+		bindLimitButton(line.Objects[1].(*widget.Button), settings, fmt.Sprintf("download:%d", index), label, func(key, filename string) {
+			settings.editDownload(w, key, filename, refresh)
+		})
+		columns.Objects[0].(*widget.Label).SetText(label)
+		detail := j.State + "  ·  " + j.Message
+		if j.Progress != nil && j.State != "Completed" {
+			detail = fmt.Sprintf("%s  ·  %.1f%%  ·  %s", j.State, *j.Progress*100, j.Message)
+		}
+		columns.Objects[1].(*widget.Label).SetText(detail)
+		bar := row.Objects[1].(*widget.ProgressBar)
+		if j.State == "Completed" {
+			showProgress(bar, 1, true)
+		} else if j.Progress != nil {
+			showProgress(bar, *j.Progress, true)
+		} else {
+			showProgress(bar, 0, false)
+		}
 	})
 	list.OnSelected = func(id widget.ListItemID) {
-		selected = id
-		j := jobs[id]
+		selected = visible()[id]
+		j := jobs[selected]
 		status.SetText(j.State + ": " + j.Message)
 		_, partialErr := os.Lstat(j.Path + ".part")
 		if cancel == nil && j.Path != "" && (j.State == "Paused" || j.State == "Interrupted" || (j.State == "Failed" && partialErr == nil)) {
@@ -143,6 +201,7 @@ func main() {
 		if cancel != nil {
 			return
 		}
+		args = append(args, "-live-speed-file", settings.path, "-live-speed-key", fmt.Sprintf("download:%d", index))
 		jobs[index].State, jobs[index].Message = "Downloading", "Connecting…"
 		if !persist() {
 			return
@@ -154,7 +213,6 @@ func main() {
 		resume.Disable()
 		pause.Enable()
 		status.SetText("Connecting…")
-		progress.SetValue(0)
 		go func() {
 			last := ""
 			err := download(ctx, args, func(line string) {
@@ -171,10 +229,8 @@ func main() {
 						}
 					}
 					jobs[index].Message = line
-					if start, end := strings.Index(line, "("), strings.Index(line, "%)"); start >= 0 && end > start {
-						if percent, e := strconv.ParseFloat(line[start+1:end], 64); e == nil {
-							progress.SetValue(percent / 100)
-						}
+					if value, known := progressValue(line); known {
+						jobs[index].Progress = &value
 					}
 					status.SetText(line)
 					refresh()
@@ -199,7 +255,6 @@ func main() {
 					}
 				default:
 					j.State, j.Message = "Completed", "Download complete."
-					progress.SetValue(1)
 					if j.Replace != nil {
 						if e := completeReplacement(j); e != nil {
 							j.State, j.Message = "Needs attention", e.Error()
@@ -210,12 +265,10 @@ func main() {
 				}
 				persist()
 				refresh()
-				list.UnselectAll()
-				list.Select(index)
+				selectJob(index)
 				status.SetText(j.State + ": " + j.Message)
 				if closing {
-					w.SetCloseIntercept(nil)
-					w.Close()
+					finishClose()
 					return
 				}
 				if err != nil && ctx.Err() == nil && j.Path != "" && j.URL != "" {
@@ -231,8 +284,7 @@ func main() {
 		jobs[index].State, jobs[index].Message = "Already exists", "Choose what to do with the existing file."
 		persist()
 		refresh()
-		list.UnselectAll()
-		list.Select(index)
+		selectJob(index)
 		message := widget.NewLabel("A file with this name already exists. What would you like to do?")
 		message.Wrapping = fyne.TextWrapWord
 		var prompt dialog.Dialog
@@ -275,10 +327,12 @@ func main() {
 	start.OnTapped = func() {
 		raw := strings.TrimSpace(link.Text)
 		if raw == "" {
-			status.SetText("Enter a download link to continue.")
+			dialog.ShowInformation("Download link required", "Enter a download link to continue.", w)
 			w.Canvas().Focus(link)
 			return
 		}
+
+		newDownload.Hide()
 		if strings.TrimSpace(directory.Text) == "" && strings.TrimSpace(name.Text) == "" {
 			for _, previous := range jobs {
 				if previous.URL == raw && previous.State == "Completed" && previous.Path != "" {
@@ -293,7 +347,7 @@ func main() {
 		jobs = append(jobs, job{URL: raw})
 		index := len(jobs) - 1
 		runJob(index, downloadArgs(raw, strings.TrimSpace(directory.Text), strings.TrimSpace(name.Text)))
-		list.Select(index)
+		selectJob(index)
 	}
 	resume.OnTapped = func() {
 		if selected < 0 || selected >= len(jobs) || jobs[selected].Path == "" {
@@ -301,15 +355,33 @@ func main() {
 		}
 		runJob(selected, []string{"-resume", "-out", jobs[selected].Path})
 	}
-	title := widget.NewLabelWithStyle("FluxGet", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	subtitle := widget.NewLabel("Your downloads, in one place")
-	form := container.NewVBox(widget.NewLabel("Download link"), link, widget.NewLabel("Save to"), container.NewBorder(nil, nil, nil, browse, directory), widget.NewLabel("Filename (optional)"), name, container.NewHBox(start, pause))
-	controls := container.NewVBox(widget.NewCard("New download", "Paste a direct link to get started", form), widget.NewCard("Activity", "", container.NewVBox(progress, status)))
-	header := container.NewHBox(widget.NewLabelWithStyle("Downloads", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), resume, open)
-	downloads := container.NewBorder(header, nil, nil, nil, list)
-	split := container.NewHSplit(container.NewVScroll(controls), downloads)
-	split.Offset = 0.42
-	w.SetContent(container.NewBorder(container.NewPadded(container.NewVBox(title, subtitle, widget.NewSeparator())), nil, nil, nil, split))
+	form := container.NewVBox(widget.NewLabel("Download link"), link, widget.NewLabel("Save to"), container.NewBorder(nil, nil, nil, browse, directory), widget.NewLabel("Filename (optional)"), name, start)
+	newDownload = dialog.NewCustom("Add a download", "Close", form, w)
+	newDownload.Resize(fyne.NewSize(560, 440))
+	add := widget.NewButtonWithIcon("Add URL", theme.ContentAddIcon(), func() { newDownload.Show(); w.Canvas().Focus(link) })
+	add.Importance = widget.HighImportance
+
+	open.SetIcon(theme.FolderOpenIcon())
+	toolbar := container.NewHBox(add, resume, pause, open)
+	categories := widget.NewRadioGroup([]string{"All downloads", "Unfinished", "Finished"}, func(value string) {
+		category = value
+		selected = -1
+		list.UnselectAll()
+		resume.Disable()
+		open.Disable()
+		refresh()
+	})
+	categories.SetSelected(category)
+	sidebar := container.NewPadded(container.NewVBox(widget.NewLabelWithStyle("DOWNLOADS", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), categories))
+	listHeader := container.NewPadded(container.NewGridWithColumns(2, widget.NewLabelWithStyle("File name", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), widget.NewLabelWithStyle("Status / Progress", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})))
+	downloads := container.NewBorder(listHeader, nil, nil, nil, list)
+	split := container.NewHSplit(sidebar, downloads)
+	split.Offset = 0.2
+	queueView, closeQueue := newQueueView(w, settings)
+	finishClose = func() { closeQueue(func() { w.SetCloseIntercept(nil); w.Close() }) }
+	tabs := container.NewAppTabs(container.NewTabItem("Downloads", split), container.NewTabItem("Queue", queueView), container.NewTabItem("Settings", settings.page(w)))
+	activity := container.NewVBox(widget.NewSeparator(), status)
+	w.SetContent(container.NewBorder(container.NewPadded(toolbar), container.NewPadded(activity), nil, nil, tabs))
 	w.SetCloseIntercept(func() {
 		if cancel != nil {
 			closing = true
@@ -317,8 +389,7 @@ func main() {
 			cancel()
 			return
 		}
-		w.SetCloseIntercept(nil)
-		w.Close()
+		finishClose()
 	})
 	if len(jobs) == 0 && discoveryErr == nil {
 		status.SetText("No downloads yet. Add a link to begin.")

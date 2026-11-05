@@ -133,10 +133,12 @@ func downloadNamed(ctx context.Context, client *http.Client, rawURL string, dest
 		}
 		emptySum := sha256.Sum256(nil)
 		saved = &checkpoint{Version: 2, URL: rawURL, ResolvedURL: response.Request.URL.String(), Destination: absoluteDestination, Partial: absoluteDestination + ".part", ExpectedSHA256: expectedSHA256, State: "downloading", PartialIdentity: identity, PartialToken: createPartialToken(partial), PrefixSHA256: hex.EncodeToString(emptySum[:])}
-		if response.ContentLength > 0 && len(response.Header.Values("ETag")) == 1 && strongETag(response.Header.Get("ETag")) {
+		if response.ContentLength > 0 {
 			total := response.ContentLength
 			saved.Total = &total
-			saved.ETag = response.Header.Get("ETag")
+			if len(response.Header.Values("ETag")) == 1 && strongETag(response.Header.Get("ETag")) {
+				saved.ETag = response.Header.Get("ETag")
+			}
 		}
 		if err := saveCheckpoint(checkpointPath, partial, *saved); err != nil {
 			return 0, fmt.Errorf("save active job state; partial file kept: %w", err)

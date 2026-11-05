@@ -5,13 +5,13 @@ The long-term goal is an IDM-like download manager, starting with a reliable Lin
 
 **Status:** Early CLI and desktop prototypes. Sequential and parallel range downloads are implemented on Linux. The desktop app starts individual downloads through the CLI and displays its own download history; the first desktop preview has been reviewed by the operator. Native testing on other operating systems is still pending.
 
-The first hosted CI run passed formatting, vet, race tests, and Linux/Windows/macOS builds. A local Linux/amd64 build has downloaded and verified a real 30.9 MB file over the internet to ext4; see the roadmap for the test's limits.
+Hosted CI passed formatting, vet, race tests, the desktop build, and Linux/Windows/macOS builds for commit `98a4fbe`. A local Linux/amd64 build has downloaded and verified a real 30.9 MB file over the internet to ext4; see the roadmap for the test's limits.
 The queue enforces an active-download limit; downloads also use bounded timeouts and retries. Other planned resource limits are documented in the roadmap.
 An active-download limit concerns simultaneous transfers, not the number of files a user can add to a queue.
 The queue defaults to five simultaneous downloads and supports a configurable limit, including ten. Eligible new downloads use up to four connections by default.
 The planned recovery behavior preserves partial files by default and requires an explicit resume after restarting the application.
 The CLI can list saved jobs, resume a known output path, and manage a persistent queue. Transfers do not start automatically when the queue is opened.
-On Linux, interrupted downloads can be resumed when the server provides a strong ETag, a known length, and safe byte ranges. Parallel checkpoints record each fully verified chunk independently.
+On Linux, interrupted downloads with a strong ETag can resume using validated ranges. Without a strong validator, sequential recovery can verify the saved prefix against a single fresh, known-length response before appending. Parallel checkpoints record each fully verified chunk independently.
 Phase 0 decisions include the license, supported platforms, and resource limits.
 Linux tests cover full-disk and permission failures, repeated queue process crashes and retries, checkpoint-replacement failures, and final-publication process crashes; other platforms and power loss still need verification.
 Go 1.26.8 is installed for the current Linux user under `~/.local/share/go1.26.8`, with commands in `~/.local/bin`.
@@ -83,6 +83,7 @@ The filename can come from the final response's `Content-Disposition` header, in
 | -queue | Open the interactive Linux queue |
 | -max-active | Maximum simultaneous queue downloads, 1–64 (default 5); use with `-queue` |
 | -connections | Maximum connections per download, 1–16 (default 4); applies to the current CLI or queue session |
+| -speed-limit | Maximum body-read speed in KiB/s; 0 means unlimited. For a queue, the limit is shared across its active downloads. |
 | -h | Show help |
 
 Progress is written to standard error as data arrives; successful execution reports the number of bytes written and the destination on standard output. Ctrl+C cancels an active request. A checksum mismatch leaves the `.part` file for inspection and does not publish the destination.
@@ -119,7 +120,9 @@ To resume an eligible interrupted download from the same output path:
 go run . -resume -out "go-releases.json"
 ```
 
-Linux checkpoints are stored in the FluxGet jobs directory under the user configuration directory and contain the source URL. Do not use secret-bearing URLs. Resume checks the saved partial file and, when data remains to download, requires an unchanged resolved URL and strong ETag, a known size, and valid range responses. Parallel recovery verifies each completed chunk and downloads only missing chunks. The original `-sha256`, if supplied, is retained. If these checks fail, the partial file is kept and no final file is published.
+Linux checkpoints are stored in the FluxGet jobs directory under the user configuration directory and contain the source URL. Do not use secret-bearing URLs. Resume checks the saved partial file. When a strong ETag is available, it validates the resolved URL and range responses. Otherwise, it downloads the saved prefix again, verifies its SHA-256 against the local checkpoint, and only then appends the remaining bytes from the same known-length response. This fallback consumes bandwidth for the prefix and cannot authenticate a file without a trusted checksum. Parallel recovery requires a strong ETag and verifies each completed chunk. If checks fail, the partial file is kept and no final file is published.
+
+For example, `-speed-limit 512` limits a standalone download to approximately 512 KiB/s across its connections. With `-queue`, the same limit is shared by all active queue downloads. In the desktop Settings tab, enable a persistent default ceiling for each download. Use the **Limit** button beside a download to set its separate ceiling, including while it is running; 0 removes that individual ceiling. When both are enabled, the lower ceiling applies. The Queue tab also has a separate shared queue-wide limit set before opening the queue; the row limit can be changed while a queued transfer runs. Network and OS buffering can cause short bursts.
 
 Downloads and queue jobs retry selected temporary failures up to three times after the initial attempt, waiting 1, 2, and 4 seconds. HTTP 408, 429, 500, 502, 503, and 504 can be retried; a valid `Retry-After` of up to one minute is respected, and longer waits stop automatic retries. Connection and TLS handshake timeouts are 10 seconds, response headers have 30 seconds, and a stalled body read has 60 seconds. A transfer can run longer as long as it keeps receiving data. If saved bytes cannot be resumed safely, retries stop and preserve the partial file.
 
@@ -171,7 +174,11 @@ go build -o dist/fluxget .
 
 Paste a link and optionally choose a folder and filename. The window shows download history and progress; select a paused or interrupted download to resume it when the server supports safe recovery. Existing files offer **Keep existing file**, **Save another copy**, or **Replace existing file**. Replacement downloads a separate copy first and checks that the original has not changed before replacing it. The CLI executable must remain beside `fluxget-gui`.
 
-The desktop app runs one download at a time. It discovers interrupted standalone CLI checkpoints, including checkpoints from the earlier desktop prototype, but older completed downloads made outside this desktop history are not automatically listed. Desktop history stores URLs under the user configuration directory, so do not use secret-bearing links. Queue management remains available in the CLI.
+The Downloads tab has an action toolbar, an all/unfinished/finished filter, and a download list. Each download row shows its own progress line when its total size is known. Choose **Add URL** to enter a link and optional destination and filename. Use the **Limit** button beside a row to change its speed, including while it is running. The Downloads tab runs one standalone download at a time. It discovers interrupted standalone CLI checkpoints, including checkpoints from the earlier desktop prototype, but older completed downloads made outside this desktop history are not automatically listed. Desktop history stores URLs under the user configuration directory, so do not use secret-bearing links.
+
+The Queue tab uses the same persistent queue as `-queue`. Choose the simultaneous-download limit, open the queue, add jobs, and select **Start queue**; select a job to pause, resume, cancel, retry, or remove it from the queue. Removing a job keeps its files. **Import saved download** accepts the full output path of an existing checkpoint. Closing the queue or window pauses active queue jobs. Previously active jobs reopen paused and require an explicit resume. Only one desktop or CLI queue can own the queue at a time.
+
+Queue jobs need a destination before they start. If the full path is left empty, FluxGet uses the original URL filename in the configured Downloads folder (or `download` when no filename is available); server-provided filenames are not used for queued jobs. Queue jobs refuse existing destinations and partial files; choose another path if needed. The standalone Downloads tab retains its separate duplicate-file choices. The queue's active-download limit does not include a simultaneous standalone download.
 
 On Linux or macOS:
 
@@ -271,7 +278,7 @@ Repeatable local single-download and queue experiments are documented in [BENCHM
 - A crash between creating the partial file and saving the initial job record can leave an undiscovered partial file. Parallel recovery may redownload work in an unfinished chunk. Power-loss recovery is not guaranteed.
 - Final-publication recovery requires an explicit `-resume`; legacy checkpoints without a completed-publication record require manual inspection.
 - No simultaneous network-interface use yet.
-- The desktop prototype supports one download at a time; queue management and browser integration are not yet available in the UI. Resuming requires a usable checkpoint and server support.
+- The desktop queue currently uses URL-derived filenames and does not offer the standalone download's duplicate-file choices. Browser integration is not yet available. Resuming requires a usable checkpoint and server support.
 - Progress updates occur when data is written, so a stalled connection does not produce regular updates.
 - Public direct URLs are the intended input; credential-bearing links and authenticated website workflows are outside the current scope.
 - Final publication requires hard-link support. Power-loss recovery is not guaranteed.

@@ -10,11 +10,12 @@ import (
 )
 
 type job struct {
-	URL     string       `json:"url"`
-	Path    string       `json:"path"`
-	State   string       `json:"state"`
-	Message string       `json:"message,omitempty"`
-	Replace *replacement `json:"replace,omitempty"`
+	URL      string       `json:"url"`
+	Path     string       `json:"path"`
+	State    string       `json:"state"`
+	Message  string       `json:"message,omitempty"`
+	Progress *float64     `json:"progress,omitempty"`
+	Replace  *replacement `json:"replace,omitempty"`
 }
 
 type replacement struct {

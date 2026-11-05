@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -204,6 +205,22 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 				for _, j := range q.Jobs {
 					fmt.Fprintf(output, "%d\t%s\t%q\n", j.ID, j.State, j.Destination)
 				}
+			case "snapshot":
+				type entry struct {
+					ID          int    `json:"id"`
+					State       string `json:"state"`
+					Destination string `json:"destination"`
+				}
+				entries := make([]entry, 0, len(q.Jobs))
+				for _, j := range q.Jobs {
+					entries = append(entries, entry{j.ID, j.State, j.Destination})
+				}
+				data, e := json.Marshal(entries)
+				if e != nil {
+					fmt.Fprintln(output, "Cannot encode queue snapshot.")
+				} else {
+					fmt.Fprintf(output, "QUEUE_JSON %s\n", data)
+				}
 			case "inspect":
 				id, e := strconv.Atoi(arg)
 				i := find(id)
@@ -216,9 +233,19 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 				started = true
 			case "quit":
 				shutdown(nil)
-			case "add", "import":
+			case "add", "import", "add-json", "import-json":
 				raw, dest := "", arg
-				if command == "add" {
+				if command == "add-json" || command == "import-json" {
+					var input struct {
+						URL         string `json:"url"`
+						Destination string `json:"destination"`
+					}
+					if e := json.Unmarshal([]byte(arg), &input); e != nil {
+						fmt.Fprintln(output, "Invalid queue input.")
+						continue
+					}
+					raw, dest = input.URL, input.Destination
+				} else if command == "add" {
 					raw, dest, _ = strings.Cut(arg, " ")
 					dest = strings.TrimSpace(dest)
 				}
@@ -227,7 +254,8 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 					continue
 				}
 				dest, err = filepath.Abs(dest)
-				if err != nil || arg == "" || (command == "add" && (!validQueueURL(raw) || strings.TrimSpace(dest) == "")) {
+				isImport := command == "import" || command == "import-json"
+				if err != nil || arg == "" || (!isImport && (!validQueueURL(raw) || strings.TrimSpace(dest) == "")) {
 					fmt.Fprintln(output, "Invalid URL or destination.")
 					continue
 				}
@@ -247,7 +275,7 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 					continue
 				}
 				state := "queued"
-				if command == "import" {
+				if isImport {
 					c, e := loadCheckpoint(cp)
 					if e != nil || c.Destination != dest {
 						fmt.Fprintln(output, "No valid saved job for this destination.")
@@ -368,6 +396,12 @@ func runQueueDownload(ctx context.Context, j queueJob, connections int) error {
 
 func runQueueDownloadWithProgress(ctx context.Context, j queueJob, connections int, progress io.Writer) error {
 	client := defaultDownloadClient()
+	if limiter, ok := ctx.Value(limiterContextKey{}).(*speedLimiter); ok {
+		limitClient(client, limiter)
+	}
+	if path, ok := ctx.Value(liveSpeedKey{}).(string); ok {
+		limitClient(client, &speedLimiter{gate: make(chan struct{}, 1), live: &liveSpeedSource{path: path, key: fmt.Sprintf("queue:%d", j.ID)}})
+	}
 	defer client.CloseIdleConnections()
 	return withRetries(ctx, time.Second, func() error {
 		_, err := runDownloadAttempt(ctx, client, j, j.ExpectedSHA256, progress, connections)
