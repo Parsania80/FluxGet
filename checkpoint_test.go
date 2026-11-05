@@ -61,7 +61,7 @@ func TestCheckpointRejectsInvalidInputAndPreservesPrevious(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, invalid := range []checkpoint{
-		{Version: 2, URL: c.URL, Destination: destination, Partial: c.Partial, Completed: 5},
+		{Version: 3, URL: c.URL, Destination: destination, Partial: c.Partial, Completed: 5},
 		{Version: 1, URL: "https://user:pass@example.com/file", Destination: destination, Partial: c.Partial, Completed: 5},
 		{Version: 1, URL: c.URL, Destination: destination, Partial: c.Partial, Completed: 6},
 		{Version: 1, URL: c.URL + strings.Repeat("a", 1<<20), Destination: destination, Partial: c.Partial, Completed: 5},
@@ -107,7 +107,7 @@ func TestCheckpointFailedPublicationCleansTemporaryFile(t *testing.T) {
 
 func TestLoadCheckpointRejectsCorruption(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "job.json")
-	for _, content := range []string{"{", `{ "version": 2 }`, `{"version":1} {}`, `{"version":1,"unknown":true}`, strings.Repeat(" ", (1<<20)+1)} {
+	for _, content := range []string{"{", `{ "version": 2 }`, `{"version":1} {}`, `{"version":1,"unknown":true}`, `{"version":1,"url":"https://example.com","destination":"/tmp/file","partial":"/tmp/file.part","state":"unknown"}`, strings.Repeat(" ", (1<<20)+1)} {
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}

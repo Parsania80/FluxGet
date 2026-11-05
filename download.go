@@ -64,6 +64,9 @@ func download(ctx context.Context, client *http.Client, rawURL, destination, exp
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
+		if err := transientStatus(response); err != nil {
+			return 0, err
+		}
 		return 0, fmt.Errorf("server returned HTTP %d; expected 200", response.StatusCode)
 	}
 	encoding := response.Header.Get("Content-Encoding")
@@ -105,11 +108,19 @@ func download(ctx context.Context, client *http.Client, rawURL, destination, exp
 		if err != nil {
 			return 0, err
 		}
-		saved = &checkpoint{Version: 1, URL: rawURL, ResolvedURL: response.Request.URL.String(), Destination: absoluteDestination, Partial: absoluteDestination + ".part", ExpectedSHA256: expectedSHA256}
+		identity, _, err := identifyPartial(partial)
+		if err != nil {
+			return 0, fmt.Errorf("identify partial file: %w", err)
+		}
+		emptySum := sha256.Sum256(nil)
+		saved = &checkpoint{Version: 2, URL: rawURL, ResolvedURL: response.Request.URL.String(), Destination: absoluteDestination, Partial: absoluteDestination + ".part", ExpectedSHA256: expectedSHA256, State: "downloading", PartialIdentity: identity, PartialToken: createPartialToken(partial), PrefixSHA256: hex.EncodeToString(emptySum[:])}
 		if response.ContentLength > 0 && len(response.Header.Values("ETag")) == 1 && strongETag(response.Header.Get("ETag")) {
 			total := response.ContentLength
 			saved.Total = &total
 			saved.ETag = response.Header.Get("ETag")
+		}
+		if err := saveCheckpoint(checkpointPath, partial, *saved); err != nil {
+			return 0, fmt.Errorf("save active job state; partial file kept: %w", err)
 		}
 	}
 

@@ -76,6 +76,7 @@ func reconcilePublication(ctx context.Context, path string, c checkpoint, expect
 	if !strings.EqualFold(actual, c.PrefixSHA256) || (expected != "" && !strings.EqualFold(actual, expected)) {
 		return 0, errors.New("publication file checksum does not match; all files kept")
 	}
+	clearPartialToken(file, c.PartialToken)
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}

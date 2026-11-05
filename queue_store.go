@@ -1,0 +1,140 @@
+package main
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/url"
+	"os"
+	"path/filepath"
+)
+
+type cleanupIntent struct {
+	Action         string          `json:"action"`
+	Identity       partialIdentity `json:"identity"`
+	CheckpointHash string          `json:"checkpoint_sha256"`
+}
+
+type queueJob struct {
+	ID             int            `json:"id"`
+	URL            string         `json:"url"`
+	Destination    string         `json:"destination"`
+	State          string         `json:"state"`
+	ExpectedSHA256 string         `json:"expected_sha256,omitempty"`
+	Cleanup        *cleanupIntent `json:"cleanup,omitempty"`
+}
+type queueData struct {
+	Version int        `json:"version"`
+	NextID  int        `json:"next_id"`
+	Jobs    []queueJob `json:"jobs"`
+}
+
+func queuePath() (string, error) {
+	dir, err := jobDirectory()
+	if err != nil {
+		return "", err
+	}
+	if err = os.MkdirAll(dir, 0700); err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(dir), "queue.json"), nil
+}
+
+func validQueueURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Hostname() != "" && u.User == nil
+}
+
+func loadQueue(path string) (queueData, error) {
+	q := queueData{Version: 1, NextID: 1}
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return q, nil
+	}
+	if err != nil {
+		return q, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, (1<<20)+1))
+	if err != nil {
+		return q, err
+	}
+	if len(data) > 1<<20 {
+		return q, errors.New("queue exceeds size limit")
+	}
+	q = queueData{}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err = dec.Decode(&q); err != nil {
+		return q, err
+	}
+	if dec.Decode(new(any)) != io.EOF || q.Version != 1 || q.NextID < 1 {
+		return q, errors.New("invalid queue metadata")
+	}
+	ids := make(map[int]bool)
+	destinations := make(map[string]bool)
+	for _, j := range q.Jobs {
+		if j.ID < 1 || j.ID >= q.NextID || ids[j.ID] || destinations[j.Destination] || !filepath.IsAbs(j.Destination) || filepath.Clean(j.Destination) != j.Destination || !validQueueURL(j.URL) {
+			return q, errors.New("invalid queue job")
+		}
+		switch j.State {
+		case "queued", "running", "paused", "failed", "completed", "canceled", "resetting":
+		default:
+			return q, errors.New("invalid queue state")
+		}
+		if j.ExpectedSHA256 != "" {
+			digest, err := hex.DecodeString(j.ExpectedSHA256)
+			if err != nil || len(digest) != sha256.Size {
+				return q, errors.New("invalid queue checksum")
+			}
+		}
+		if j.State == "resetting" {
+			if j.Cleanup == nil || (j.Cleanup.Action != "restart" && j.Cleanup.Action != "discard") || j.Cleanup.Identity.Inode == 0 {
+				return q, errors.New("invalid cleanup intent")
+			}
+			digest, err := hex.DecodeString(j.Cleanup.CheckpointHash)
+			if err != nil || len(digest) != sha256.Size {
+				return q, errors.New("invalid cleanup checkpoint hash")
+			}
+		} else if j.Cleanup != nil {
+			return q, errors.New("unexpected cleanup intent")
+		}
+		ids[j.ID] = true
+		destinations[j.Destination] = true
+	}
+	return q, nil
+}
+
+func saveQueue(path string, q queueData) error {
+	data, err := json.Marshal(q)
+	if err != nil {
+		return err
+	}
+	if len(data) > 1<<20 {
+		return errors.New("queue exceeds size limit")
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), ".fluxget-queue-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err = f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	if err = os.Rename(f.Name(), path); err != nil {
+		return fmt.Errorf("publish queue: %w", err)
+	}
+	return nil
+}

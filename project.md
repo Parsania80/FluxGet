@@ -36,12 +36,20 @@ The application is local software. A hosted server, user accounts, PostgreSQL cl
 - The learner approved the first four files: go.mod, main.go, download.go, and download_test.go.
 - The project is FluxGet and the Go module is github.com/Parsania80/FluxGet, matching the GitHub repository. The Go baseline is 1.26; the operator has verified Go 1.26.8 on linux/amd64.
 - Build the CLI as fluxget with go build -o fluxget . (use fluxget.exe on Windows).
-- The CLI accepts -url and -out plus optional -sha256. It streams one response to an exclusively created destination.part file, reports progress, supports Ctrl+C cancellation, rejects non-200 responses, and preserves partial bytes on transfer failure or checksum mismatch.
+- The CLI accepts -url and -out plus optional -sha256. It streams a sequential response or validated parallel ranges to an exclusively created destination.part file, reports progress, supports Ctrl+C cancellation, rejects invalid responses, and preserves partial bytes on transfer failure or checksum mismatch.
 - Successful output is published through a same-directory hard link, then the partial name is removed. Existing destinations and partial files are refused. Filesystems without hard-link support fail safely with the partial file retained; no portable rename-overwrite guarantee is assumed.
 - Automated tests cover binary and empty files, unknown length, redirects and TLS, progress, checksums, HTTP errors, truncated responses, partial writes, disk-full and permission failures, checkpoint update failure and recovery, existing files, destination-creation races, and cancellation. They pass on Linux with Go 1.26.8.
 - Eligible Linux sequential transfers save versioned JSON checkpoints during transfer and on interruption. The `-resume` command locks the job and partial file, verifies the saved prefix and remote representation, and validates the actual resumed response before writing.
+- The `-list` command discovers saved Linux jobs without changing them. Version-two records persist sequential states; version-three records track independent parallel chunks, and version-one checkpoints remain readable. Live locks distinguish active work from interrupted records. Completed standalone jobs are removed from the saved-job listing; completed queue jobs remain in the queue history.
+- An interactive Linux queue persists queued, running, paused, failed, completed, and canceled jobs in an atomically replaced JSON file under an exclusive lock. It schedules up to five active downloads by default (configurable from 1 to 64), imports existing checkpoints, and restores previously active jobs paused. The queue loop owns lifecycle changes; workers report results to it.
+- On Linux, new downloads of at least 1 MiB use up to four range workers by default (configurable from 1 to 16 per CLI or queue session) after a successful strong-ETag range probe. Each response is validated before offset writes; unsupported servers fall back to sequential. Completed chunks are hashed, synchronized, and checkpointed independently. Recovery validates each saved chunk and the remote representation, then downloads missing ranges with the configured connection limit.
+- Queue workers send bounded, nonblocking live progress updates to the queue loop; `inspect ID` reports local checkpoint status and recovery guidance without contacting the server. Progress updates can be dropped when the display is busy.
+- Queue `restart ID` and `discard ID` explicitly remove verified partials under job ownership; cleanup intent is persisted before deletion so the same command can finish after interruption. New partials record a Linux inode identity and random user extended-attribute marker; older or unmarked files are not deleted automatically. Expected checksums survive fresh restart.
+- Standalone and queue downloads use connect, TLS, response-header, and body-read inactivity timeouts. Selected transient HTTP and network failures get up to three cancellable retries; a valid Retry-After up to one minute is honored, and a longer value stops automatic retries. Partial data is retried only through validated resume.
+- Linux parallel storage tests exercise real data and checkpoint ENOSPC and permission errors during fresh transfers and recovery. They check saved chunks and retry successfully after restoring space or permissions, including through the queue.
+- Queue integration tests kill and restart the queue twice while chunks are saved out of order, inject transient probe and range failures, and verify saved chunks, limits, explicit restart, and backoff cancellation.
 - Linux process-kill tests cover checkpoint data write, sync and publication, plus the points before and after final linking and partial-file removal. A completed-publication checkpoint allows explicit `-resume` to verify and reconcile these final-publication states without overwriting conflicting files.
-- Resume currently requires a known length, strong ETag, unchanged resolved URL, and valid range support. Recovery-window retries, parallelism, a persistent queue, and additional platform verification remain future steps.
+- Resume currently requires a known length, strong ETag, unchanged resolved URL, and valid range support. Recovery-window retries and additional platform verification remain future steps.
 - README.md documents the actual prototype, usage, verification commands, and limitations. Local Git metadata now contains commit 195d06bef804. Remote publication has not been verified. The current .gitignore covers debugger binaries and the default debug download.
 - .vscode/launch.json adds an optional Go/Delve launch profile that prompts for a URL and destination. README.md includes breakpoint and stepping instructions. Debugger binaries and the default debug download are ignored; a live debugger session remains unverified.
 
@@ -217,7 +225,7 @@ Go offers offset-based writes through [File.WriteAt](https://pkg.go.dev/os#File.
 - [x] Use Linux as the primary development OS while keeping shared code portable for Windows and macOS.
 - [ ] Finalize CLI interaction, startup recovery, pause, cancel, retry, and overwrite behavior.
 - [x] Select versioned JSON job metadata and define checkpoint update ordering; implement and test the design during persistence work.
-- [ ] Define the initial job lifecycle and the owner of each mutable state field.
+- [ ] Define the full job lifecycle and the owner of each mutable state field. Version-two checkpoints persist sequential states and version-three checkpoints persist parallel chunks; the queue loop owns the basic persisted queue states, while additional lifecycle details remain open.
 - [ ] Set initial active-job, worker, buffer, timeout, and retry limits; implement and test the chosen concurrency controls and resolve the remaining proposed values in the relevant phases.
 - [ ] Define redirect, unsupported-validator, and unsupported-range policies. Reject HTTPS-to-HTTP redirects; the current prototype allows up to nine redirects. Unsupported-validator and unsupported-range details remain open.
 - [ ] Record application-crash guarantees and exclusions.
@@ -239,7 +247,7 @@ Versioned JSON is selected for the first implementation; no external storage lib
 - Allow only one active owner of a job and its partial file. Validate the format version, paths, file identity, saved ranges, and remote representation before trusting saved work. Unsupported or corrupt records require attention rather than silent reuse or deletion.
 - Before recording completed bytes, stop or coordinate the relevant writers and synchronize the partial file. Write the new JSON to a separate temporary file in the metadata directory, synchronize and close it, then atomically replace the previous record using a mechanism verified on the target platform. If an update fails, report it and keep the last valid checkpoint when possible.
 - On restart, recover only complete, validated records and safely saved bytes; ignore incomplete temporary updates. A crash may lose progress since the last checkpoint, which can be downloaded again. Do not claim power-loss durability until file and directory synchronization guarantees are specified and tested.
-- The sequential Linux flow saves checkpoints approximately every 1 MiB and on eligible transfer errors, validating the local prefix and both the remote probe and the actual resumed range response. Before final publication, it saves a completed-file digest and state; explicit `-resume` verifies and reconciles the file and any same-inode partial name. A crash before the first checkpoint may leave an unresumable partial file; older checkpoints without the completed state cannot be reconciled automatically. Parallel ranges, non-Linux locking and metadata replacement, startup-wide reconciliation, and power-loss durability remain to be implemented and tested.
+- The sequential Linux flow saves an initial job record, progress checkpoints approximately every 1 MiB when applicable, and interruption state, validating the local prefix and both the remote probe and the actual resumed range response. Before final publication, it saves a completed-file digest and state; explicit `-resume` verifies and reconciles the file and any same-inode partial name. A crash before the initial record can leave an undiscovered partial file, and a crash before the first progress checkpoint can require a fresh download. Older checkpoints without the completed state cannot be reconciled automatically. Parallel chunk checkpoints are synchronized and atomically published as workers finish; process-kill tests cover their recovery. Non-Linux locking and metadata replacement, startup-wide reconciliation, and power-loss durability remain to be implemented and tested.
 
 **Done when:** Initial decisions are recorded and the sequential transfer implementation has a clear contract.
 
@@ -250,7 +258,7 @@ These are design targets, not guarantees of current implementation. The concurre
 | Resource | Initial default | Scope |
 | --- | --- | --- |
 | Active downloads | 5 | User-configurable simultaneous job limit; additional jobs wait in the queue. Users can choose 10 or another supported value. |
-| Workers | 4 per active job | User-configurable default maximum connections per file, with a per-download override. Sequential jobs use one worker. Actual concurrency depends on range support and file size. |
+| Workers | 4 per active job | Configurable from 1 to 16 per CLI or queue session. Sequential jobs and legacy sequential resumes use one worker; parallel resumes honor the configured limit. Per-job queue overrides remain planned. |
 | Transfer buffer | 32 KiB per worker | Bound per-worker copy buffering; this is not a cap on total process memory. |
 | Connection timeout | 10 seconds | Time allowed to establish a network connection. |
 | TLS handshake timeout | 10 seconds | Time allowed for each TLS handshake. |
@@ -258,13 +266,13 @@ These are design targets, not guarantees of current implementation. The concurre
 | Read inactivity timeout | 60 seconds | Abort a transfer if no response-body bytes arrive for this interval; no fixed limit on the total download duration. |
 | Retries | 3 retries after the initial attempt | Retry transient failures only, with cancelable exponential delays of 1, 2, and 4 seconds; permanent failures are not retried. |
 
-These limits are future implementation targets. Retrying partial work still requires representation validation and the applicable resume safety rules; no retry may silently append bytes from an unverified representation. Retry guidance and remaining redirect policy details are separate Phase 0 decisions.
+The active-job limit, timeout defaults, and bounded retries are implemented. The per-file parallel worker limit is implemented for each CLI or queue session; per-job queue overrides remain future work. Retrying partial work still requires representation validation and the applicable resume safety rules; no retry may silently append bytes from an unverified representation. Retry-After values above one minute stop automatic retries; remaining redirect policy details are separate Phase 0 decisions.
 
 The active-download limit and per-file worker limit are independent: changing one does not change the other. Both accept validated positive values; their implementation must enforce finite safety bounds, with exact bounds and server-specific connection policy to be decided before implementing the controls. Unsupported ranges or unsafe representation identity fall back to a single fresh sequential transfer.
 
 ### Pause, resume, cancel, and restart behavior
 
-These are v0.1 design decisions for the future persistent queue. The current prototype supports only explicit sequential resume; the remaining queue lifecycle is not implemented.
+These are v0.1 design decisions. The Linux queue implements explicit fresh restart and verified partial-file removal for marked files.
 
 | Action | Intended behavior |
 | --- | --- |
@@ -274,7 +282,7 @@ These are v0.1 design decisions for the future persistent queue. The current pro
 | Restart application | Reload saved jobs without automatically starting transfers. Restore jobs interrupted while active as paused or as needing attention if recovery validation fails; keep completed, failed, and canceled states visible. The user explicitly resumes or starts queued work. |
 | Fresh restart of a job | If saved bytes cannot be safely reused, require an explicit fresh-start action. Preserve existing partial data unless the user explicitly chooses its removal, and never overwrite an existing destination. |
 
-After an application crash, recovery may re-download work since the last safe checkpoint but must never treat incomplete bytes as complete. Power-loss durability is not promised until its separate contract and tests are defined. Full checkpoint integration and CLI commands remain to be decided.
+After an application crash, recovery may re-download work since the last safe checkpoint but must never treat incomplete bytes as complete. Power-loss durability is not promised until its separate contract and tests are defined. The queue uses checkpoint validation on resume and persists explicit cleanup intent before removing owned partial files.
 
 ## 8. Phase 1 - Establish the Go foundation
 
@@ -285,7 +293,7 @@ After an application crash, recovery may re-download work since the last safe ch
 - [ ] Add validated configuration and consistent error types.
 - [ ] Use cancellation contexts for jobs and application shutdown.
 - [ ] Establish structured diagnostic logging and a separate progress output path.
-- [ ] Add formatting, static checks, and automated tests in CI.
+- [ ] Add formatting, static checks, and automated tests in CI. A GitHub Actions workflow is configured; its first hosted run remains to be verified.
 - [ ] Create a deterministic local HTTP test server.
 - [ ] Document development setup on Linux and Windows.
 
@@ -311,15 +319,15 @@ After an application crash, recovery may re-download work since the last safe ch
 
 **Goal:** Download independent chunks without corrupting the output.
 
-- [ ] Probe range behavior and capture the selected representation's identity.
-- [ ] Define chunk boundaries with no gaps or overlaps, including the last chunk.
-- [ ] Implement a bounded worker pool and offset-based file writes.
-- [ ] Validate each response before accepting its bytes.
-- [ ] Keep concurrency ownership clear and progress aggregation race-free.
-- [ ] Stop sibling workers when a job becomes invalid or is canceled.
-- [ ] Implement safe fallback when a server ignores or rejects range requests.
-- [ ] Handle changed validators, truncated chunks, inconsistent sizes, and invalid ranges.
-- [ ] Run relevant concurrent tests with Go's race detector.
+- [x] Probe range behavior and capture the selected representation's identity.
+- [x] Define chunk boundaries with no gaps or overlaps, including the last chunk.
+- [x] Implement a bounded worker pool and offset-based file writes.
+- [x] Validate each response before accepting its bytes.
+- [x] Keep concurrency ownership clear and progress aggregation race-free.
+- [x] Stop sibling workers when a job becomes invalid or is canceled.
+- [x] Implement safe fallback when a server ignores or rejects range requests.
+- [x] Handle changed validators, truncated chunks, inconsistent sizes, and invalid ranges.
+- [x] Run relevant concurrent tests with Go's race detector.
 
 **Done when:** Sequential and parallel downloads produce identical output, and unsupported servers fall back without mixed or duplicated content.
 
@@ -335,7 +343,7 @@ After an application crash, recovery may re-download work since the last safe ch
 - [ ] Detect missing, truncated, replaced, or incompatible partial files and metadata.
 - [ ] Reject simultaneous ownership of the same saved job.
 - [ ] Recover safely when termination occurs during writing, checkpointing, verification, or final publication.
-- [ ] Define explicit keep/remove behavior for canceled partial downloads.
+- [x] Define explicit keep/remove behavior for canceled partial downloads.
 
 **Done when:** Process interruption preserves a recoverable checkpoint, and no recovery path silently skips incomplete data.
 
@@ -343,15 +351,15 @@ After an application crash, recovery may re-download work since the last safe ch
 
 **Goal:** Make the engine usable for more than one file.
 
-- [ ] Implement queue operations through the running CLI.
+- [x] Implement basic queue operations through the running CLI, including import of saved jobs.
 - [ ] Enforce separate limits for active jobs and workers per job.
 - [ ] Define states such as queued, probing, downloading, paused, verifying, completed, failed, and canceled.
-- [ ] Make invalid state transitions fail predictably.
-- [ ] Retry transient failures with capped backoff and a finite retry budget.
-- [ ] Respect applicable server retry guidance and avoid retrying permanent failures indefinitely.
-- [ ] Make backoff waits cancelable and shutdown responsive.
-- [ ] Keep progress rendering from blocking transfer workers.
-- [ ] Expose clear error details and allow explicit retry of failed jobs.
+- [x] Make invalid state transitions fail predictably.
+- [x] Retry transient failures with capped backoff and a finite retry budget.
+- [x] Respect bounded Retry-After guidance and avoid retrying permanent failures indefinitely.
+- [x] Make backoff waits cancelable and shutdown responsive.
+- [x] Keep progress rendering from blocking transfer workers.
+- [x] Expose clear error details and allow explicit retry of failed jobs.
 - [ ] Explain when resume is unavailable and a fresh download is required.
 
 **Done when:** Several queued jobs remain responsive under failure, and limits and lifecycle transitions hold during pause, cancel, retry, and shutdown.
@@ -380,28 +388,30 @@ Cross-compilation creates a target executable; it does not verify runtime behavi
 
 **Goal:** Make the engine's reliability visible and reproducible.
 
-| Scenario | Required evidence |
+| Scenario | Evidence and status |
 | --- | --- |
-| Ordinary transfer | Output matches a known test fixture byte for byte |
-| Parallel transfer | Correct output across different chunk sizes and worker limits |
-| Range unsupported | Clean sequential fallback |
-| Remote file changes | Old and new representations cannot be combined silently |
-| Pause and restart | Validated checkpoint recovery with no skipped bytes |
-| Process crash | Recovery succeeds at injected interruption points |
-| Network loss and slow responses | Bounded retries, timeouts, and responsive cancellation |
-| Disk and permission failures | Clear failure and no falsely completed file |
-| Checksum mismatch | Verification failure and no successful publication |
-| Conflicting writers | Second owner is rejected safely |
-| Unknown-size transfer | Streaming succeeds without misleading progress |
-| Resource limits | Memory and goroutine use remain bounded |
-| Native platforms | Published smoke tests pass for supported targets |
+| Ordinary transfer | Automated: `TestDownloadSuccess` and `TestAcceptanceBuiltCLIDownload` compare the built CLI output with a local fixture. |
+| Parallel transfer | Automated: `TestParallelRangeWorkerCountsAndRemainders` checks 2, 3, 4, and 16 workers with different remainder sizes. |
+| Range unsupported | Automated: `TestParallelFallback` checks ignored ranges, weak validators, and small files. |
+| Remote file changes | Automated: `TestResumeInterruptedDownload`, `TestChunkRecoveryRejectsChangedRemote`, and `TestParallelRejectsInvalidWorkerResponses`. |
+| Pause and restart | Automated: `TestQueuePauseWaitsForCheckpoint`, `TestParallelCancellationResumesContiguousPrefix`, and chunk-recovery tests. |
+| Process crash | Automated: checkpoint and publication crash tests, `TestParallelChunkCrashRecovery`, and `TestQueueRepeatedCrashAndTransientRecovery`. These do not establish power-loss durability. |
+| Network loss and slow responses | Automated: retry, timeout, repeated transient recovery, and cancellation tests; extended recovery-window behavior remains open. |
+| Disk and permission failures | Automated on Linux: sequential and parallel ENOSPC, permission, and checkpoint-failure tests. The tests can skip when namespaces are unavailable or when run as root. |
+| Checksum mismatch | Automated: `TestDownloadChecksumAndProgress` and `TestParallelChecksumMismatchDoesNotPublish`. |
+| Conflicting writers | Automated: `TestJobLockExclusiveAcrossProcesses` and destination-conflict tests. |
+| Unknown-size transfer | Automated: `TestDownloadUnknownLength` verifies output and progress without a percentage. |
+| Resource limits | Partial: queue and connection limits are tested; [recorded measurements](BENCHMARKS.md) cover individual and queued jobs, ext4/tmpfs, and a throttled local server, but do not prove general bounds. |
+| Native platforms | Partial: built CLI smoke tests passed locally on Ubuntu 26.04.1 Linux/amd64 with Go 1.26.8, including a real internet download to ext4; packaged release and other environment tests remain open. Windows and macOS cross-builds do not verify runtime behavior. |
+
+The local Linux acceptance suite passed on 2026-11-05 with no skips. On the same date, a locally built `go build -trimpath` Linux/amd64 binary downloaded the Go 1.24.0 source archive from GitHub to ext4 (30,902,662 bytes, 14.63 seconds); its SHA-256 `4f47402534b970bcf9f92a7af40de20f77ed7c1a295c5aec650b0f1e52c5e026` matched an independent curl download. This is a consistency check, not a publisher-signed checksum or a packaged-release test; the transfer does not establish parallel range or resume behavior. The GitHub API reported zero Actions runs, and the workflow remains untracked locally. Full v0.1 acceptance remains open, including hosted CI, broader resource bounds, packaged release testing, and the remaining roadmap requirements.
 
 ### Release tasks
 
 - [ ] Complete the acceptance scenarios and investigate races or resource leaks.
 - [ ] Fuzz untrusted range and metadata parsing where useful.
-- [ ] Measure throughput, memory, and cancellation behavior under a recorded workload.
-- [ ] Include sequential comparisons; do not imply that more workers always increase speed.
+- [x] Measure throughput, memory, and cancellation behavior under a recorded workload; see [BENCHMARKS.md](BENCHMARKS.md).
+- [x] Include sequential comparisons; see the scoped results in [BENCHMARKS.md](BENCHMARKS.md).
 - [ ] Write a README with setup, usage, architecture, limitations, and recovery instructions.
 - [ ] Record tested environments, dependency versions, and benchmark conditions.
 - [ ] Create a short demonstration of interruption and successful recovery.
@@ -477,6 +487,6 @@ Prefer evidence over broad claims. Show reproducible scenarios, failure handling
 
 ## 18. Immediate next work
 
-Finish the remaining Phase 0 choices: supported targets, metadata approach, and initial resource limits. Walk through and verify the existing sequential downloader before adding parallelism and recovery.
+Complete the remaining v0.1 release checks, including release-environment verification and broader resource-bound testing.
 
 Use the same codebase on Linux and Windows and introduce native CI early. Keep multi-interface adapters and GUI work behind their later milestone gates.

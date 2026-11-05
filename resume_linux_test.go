@@ -72,7 +72,7 @@ func TestResumeInterruptedDownload(t *testing.T) {
 				t.Fatal(err)
 			}
 			checkpoint, err := loadCheckpoint(path)
-			if err != nil || checkpoint.Completed != 6 || checkpoint.ExpectedSHA256 == "" || checkpoint.PrefixSHA256 == "" {
+			if err != nil || checkpoint.Completed != 6 || checkpoint.State != "interrupted" || checkpoint.ExpectedSHA256 == "" || checkpoint.PrefixSHA256 == "" {
 				t.Fatalf("checkpoint: %+v, error %v", checkpoint, err)
 			}
 			if mode == "edited partial" {
@@ -87,6 +87,13 @@ func TestResumeInterruptedDownload(t *testing.T) {
 				}
 				lock, err := lockJob(path+".lock", partial)
 				if err != nil {
+					t.Fatal(err)
+				}
+				// A version-one checkpoint remains usable after upgrading FluxGet.
+				checkpoint.Version = 1
+				checkpoint.State = ""
+				if err := saveCheckpoint(path, partial, checkpoint); err != nil {
+					lock.Close()
 					t.Fatal(err)
 				}
 				if _, err := resumeDownload(context.Background(), server.Client(), destination, "", nil); err == nil {
@@ -172,7 +179,7 @@ func TestCheckpointWrittenDuringTransfer(t *testing.T) {
 	deadline := time.After(5 * time.Second)
 	for {
 		c, err := loadCheckpoint(path)
-		if err == nil && c.Completed >= 1<<20 {
+		if err == nil && c.Completed >= 1<<20 && c.State == "downloading" {
 			break
 		}
 		select {
@@ -186,6 +193,9 @@ func TestCheckpointWrittenDuringTransfer(t *testing.T) {
 	cancel()
 	if err := <-done; err == nil {
 		t.Fatal("expected cancellation")
+	}
+	if c, err := loadCheckpoint(path); err != nil || c.State != "interrupted" {
+		t.Fatalf("expected persisted interrupted state, got %+v, %v", c, err)
 	}
 }
 

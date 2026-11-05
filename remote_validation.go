@@ -37,6 +37,9 @@ func validateRemote(ctx context.Context, client *http.Client, c checkpoint) erro
 		return fmt.Errorf("validate remote file: %w", err)
 	}
 	defer response.Body.Close()
+	if err := transientStatus(response); err != nil {
+		return err
+	}
 	if response.Request == nil || response.Request.URL == nil || response.Request.URL.String() != c.ResolvedURL ||
 		response.StatusCode != http.StatusPartialContent || len(response.Header.Values("ETag")) != 1 || response.Header.Get("ETag") != c.ETag ||
 		len(response.Header.Values("Content-Range")) != 1 ||

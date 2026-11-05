@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux amd64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+          cache: false
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            printf 'Unformatted Go files:\n%s\n' "$unformatted"
+            exit 1
+          fi
+      - name: Vet
+        run: go vet ./...
+      - name: Test with race detector
+        run: go test -race -count=1 -v ./...
+      - name: Build Linux executable
+        run: go build -o "$RUNNER_TEMP/fluxget" .
+      - name: Check Windows and macOS cross-builds
+        run: |
+          GOOS=windows GOARCH=amd64 go build -o "$RUNNER_TEMP/fluxget.exe" .
+          GOOS=darwin GOARCH=amd64 go build -o "$RUNNER_TEMP/fluxget-darwin" .

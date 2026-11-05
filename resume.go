@@ -17,16 +17,23 @@ import (
 	"time"
 )
 
+func jobDirectory() (string, error) {
+	config, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(config, "fluxget", "jobs"), nil
+}
+
 func checkpointLocation(destination string) (string, error) {
 	absolute, err := filepath.Abs(destination)
 	if err != nil {
 		return "", err
 	}
-	config, err := os.UserConfigDir()
+	dir, err := jobDirectory()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(config, "fluxget", "jobs")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
@@ -35,7 +42,7 @@ func checkpointLocation(destination string) (string, error) {
 }
 
 func saveInterrupted(path string, partial *os.File, c *checkpoint, written int64) error {
-	if c == nil || written <= 0 || c.Total == nil || written >= *c.Total {
+	if c == nil || written < 0 || (c.Total != nil && written > *c.Total) {
 		return nil
 	}
 	hash := sha256.New()
@@ -44,6 +51,8 @@ func saveInterrupted(path string, partial *os.File, c *checkpoint, written int64
 	}
 	c.Completed = written
 	c.PrefixSHA256 = hex.EncodeToString(hash.Sum(nil))
+	c.Version = 2
+	c.State = "interrupted"
 	if err := saveCheckpoint(path, partial, *c); err != nil {
 		return fmt.Errorf("save recovery checkpoint: %w", err)
 	}
@@ -68,6 +77,8 @@ func checkpointProgress(path string, partial *os.File, c *checkpoint, digest has
 
 func saveReadyCheckpoint(path string, partial *os.File, c *checkpoint, written int64, digest hash.Hash) error {
 	ready := *c
+	ready.Version = 2
+	ready.Chunks = nil
 	ready.State = "ready"
 	ready.Total = &written
 	ready.Completed = written
@@ -75,10 +86,15 @@ func saveReadyCheckpoint(path string, partial *os.File, c *checkpoint, written i
 	if err := saveCheckpoint(path, partial, ready); err != nil {
 		return fmt.Errorf("save final publication checkpoint; partial file kept: %w", err)
 	}
+	clearPartialToken(partial, c.PartialToken)
 	return nil
 }
 
 func resumeDownload(ctx context.Context, client *http.Client, destination, expectedSHA256 string, progress io.Writer) (int64, error) {
+	return resumeDownloadWithLimit(ctx, client, destination, expectedSHA256, progress, 4)
+}
+
+func resumeDownloadWithLimit(ctx context.Context, client *http.Client, destination, expectedSHA256 string, progress io.Writer, connections int) (int64, error) {
 	if ctx == nil || client == nil {
 		return 0, errors.New("a context and HTTP client are required")
 	}
@@ -140,6 +156,15 @@ func resumeDownload(ctx context.Context, client *http.Client, destination, expec
 	if err != nil || !reflect.DeepEqual(current, c) {
 		return 0, errors.New("checkpoint changed while acquiring ownership")
 	}
+	if c.PartialIdentity != nil {
+		identity, _, err := identifyPartial(partial)
+		if err != nil || !reflect.DeepEqual(identity, c.PartialIdentity) {
+			return 0, errors.New("partial file identity differs from checkpoint")
+		}
+	}
+	if c.Version == 3 {
+		return resumeChunks(ctx, client, path, partial, c, expectedSHA256, progress, connections)
+	}
 	hash := sha256.New()
 	if _, err := io.CopyN(hash, io.NewSectionReader(partial, 0, c.Completed), c.Completed); err != nil || !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), c.PrefixSHA256) {
 		return 0, errors.New("saved partial file does not match its checkpoint")
@@ -164,12 +189,20 @@ func resumeDownload(ctx context.Context, client *http.Client, destination, expec
 		return 0, fmt.Errorf("request remaining data: %w", err)
 	}
 	defer response.Body.Close()
+	if err := transientStatus(response); err != nil {
+		return 0, err
+	}
 	if response.Request == nil || response.Request.URL == nil || response.Request.URL.String() != c.ResolvedURL ||
 		response.StatusCode != http.StatusPartialContent || len(response.Header.Values("ETag")) != 1 || response.Header.Get("ETag") != c.ETag ||
 		len(response.Header.Values("Content-Range")) != 1 || response.Header.Get("Content-Range") != fmt.Sprintf("bytes %d-%d/%d", c.Completed, *c.Total-1, *c.Total) ||
 		len(response.Header.Values("Content-Encoding")) > 1 || (response.Header.Get("Content-Encoding") != "" && !strings.EqualFold(response.Header.Get("Content-Encoding"), "identity")) ||
 		(response.ContentLength >= 0 && response.ContentLength != *c.Total-c.Completed) {
 		return 0, errors.New("resume response does not match saved checkpoint")
+	}
+	c.Version = 2
+	c.State = "downloading"
+	if err := saveCheckpoint(path, partial, c); err != nil {
+		return 0, fmt.Errorf("save active job state: %w", err)
 	}
 	if err := partial.Truncate(c.Completed); err != nil {
 		return 0, fmt.Errorf("discard uncheckpointed data: %w", err)
