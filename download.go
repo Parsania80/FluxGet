@@ -48,6 +48,7 @@ func downloadNamed(ctx context.Context, client *http.Client, rawURL string, dest
 	}
 	partialPath := destination + ".part"
 	if resolve == nil {
+		announceDestination(progress, destination)
 		for _, path := range []string{destination, partialPath} {
 			if err := requireAbsent(path); err != nil {
 				return 0, err
@@ -86,6 +87,7 @@ func downloadNamed(ctx context.Context, client *http.Client, rawURL string, dest
 	if resolve != nil {
 		resolve(response.Header)
 		destination = *destinationPtr
+		announceDestination(progress, destination)
 		partialPath = destination + ".part"
 		for _, path := range []string{destination, partialPath} {
 			if err := requireAbsent(path); err != nil {
@@ -188,6 +190,12 @@ func downloadNamed(ctx context.Context, client *http.Client, rawURL string, dest
 		}
 	}
 	return written, nil
+}
+
+func announceDestination(progress io.Writer, destination string) {
+	if progress != nil {
+		fmt.Fprintf(progress, "Saving to %q\n", destination)
+	}
 }
 
 // publishFile uses a hard link so an existing destination is never replaced.

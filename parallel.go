@@ -96,6 +96,7 @@ func downloadFreshNamed(ctx context.Context, client *http.Client, rawURL string,
 		}
 	}
 	if resolve == nil {
+		announceDestination(progress, destination)
 		for _, path := range []string{destination, destination + ".part"} {
 			if err := requireAbsent(path); err != nil {
 				return 0, err
@@ -112,6 +113,7 @@ func downloadFreshNamed(ctx context.Context, client *http.Client, rawURL string,
 	if resolve != nil {
 		resolve(rep.header)
 		destination = *destinationPtr
+		announceDestination(progress, destination)
 		for _, path := range []string{destination, destination + ".part"} {
 			if err := requireAbsent(path); err != nil {
 				return 0, err

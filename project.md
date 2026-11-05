@@ -17,7 +17,7 @@ The long-term product goal is to approach IDM's practical download-management ca
 
 The long-term target is Windows, macOS, and Linux. Development may move between Linux and Windows using one shared Go codebase. Platform-specific features belong in small adapters.
 
-The first release is **v0.1: Reliable Download Engine**, delivered through a CLI and targeting Linux/amd64 first. Keep the shared Go code portable so ARM64, Windows, and macOS can be tested and supported later. A reusable engine allows a desktop GUI to be added later without rewriting download logic.
+The first release is **v0.1: Reliable Download Engine**, targeting Linux/amd64 first. Desktop development now proceeds alongside the CLI. Keep shared behavior portable so ARM64, Windows, and macOS can be tested and supported later.
 
 ### First demonstration
 
@@ -76,7 +76,8 @@ A downloaded byte count is not proof of a correct file. A server validator is no
 | v0.1 | Reliable engine, CLI, queue, parallel ranges, conditional resume, recovery, checksums, and resource limits | Automated failure tests and native release smoke tests on the supported OS/architecture combinations |
 | v0.2 | Experimental multi-interface support on one selected OS | Measured transfers and failover across real independent network paths |
 | v0.3 | Multi-interface support extended to the other target operating systems | A documented capability matrix and real platform tests |
-| Later | Desktop GUI, browser integration, and adaptive network scheduling | Separate feature plans built around the existing engine |
+| Parallel track | Desktop GUI | Fyne prototype uses the existing CLI; evolve shared engine access and queue controls incrementally |
+| Later | Browser integration and adaptive network scheduling | Separate feature plans built around the existing engine |
 
 Release labels express order, not fixed dates. Estimate implementation effort after the initial decisions and sequential download prototype.
 
@@ -134,6 +135,8 @@ Platform adapters
 
 Remote HTTP/HTTPS servers <---- transfer workers
 ```
+
+The initial Fyne desktop app is a separate Go module and starts the existing CLI as a companion process. The CLI remains the sole owner of transfer, checkpoint, and queue behavior; a future shared engine package can replace the process boundary when needed.
 
 ### Responsibilities
 
@@ -239,7 +242,7 @@ Go offers offset-based writes through [File.WriteAt](https://pkg.go.dev/os#File.
 | Embedded SQLite | Transactions and structured queries | Requires schema management and a Go driver choice with packaging implications |
 | Another local store | May satisfy a particular demonstrated requirement | Requires justification and a comparison against the simpler options |
 
-Versioned JSON is selected for the first implementation; no external storage library or GUI framework has been selected.
+Versioned JSON is selected for persistence; Fyne v2 is selected for the separate desktop module. The CLI continues to use the Go standard library.
 
 ### Selected metadata and checkpoint design
 
@@ -454,7 +457,9 @@ This feature uses multiple ordinary connections. It does not require one TCP con
 - [ ] Test interface binding, address changes, and failover on native systems.
 - [ ] Publish a per-platform capability and privilege matrix.
 
-### Desktop GUI
+### Desktop GUI (parallel track)
+
+The operator selected a Go desktop app using Fyne on 2026-11-05. The initial single-download UI includes persistent history, checkpoint resume, and explicit duplicate-file choices; queue management remains a CLI feature.
 
 - [ ] Compare a Go GUI toolkit, a web-based desktop shell, and a local browser UI.
 - [ ] Evaluate accessibility, packaging, native dependencies, and maintenance.
@@ -489,4 +494,4 @@ Prefer evidence over broad claims. Show reproducible scenarios, failure handling
 
 Complete the remaining v0.1 release checks, including release-environment verification and broader resource-bound testing.
 
-Use the same codebase on Linux and Windows and introduce native CI early. Keep multi-interface adapters and GUI work behind their later milestone gates.
+Develop the Fyne desktop interface alongside the CLI, starting on Linux/amd64; keep multi-interface work and native support claims gated by their own tests.

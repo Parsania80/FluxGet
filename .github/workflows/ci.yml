@@ -33,6 +33,15 @@ jobs:
         run: go test -race -count=1 -v ./...
       - name: Build Linux executable
         run: go build -o "$RUNNER_TEMP/fluxget" .
+      - name: Install desktop build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
+      - name: Test and build desktop app
+        working-directory: desktop
+        run: |
+          go test -race -count=1 ./...
+          go build -o "$RUNNER_TEMP/fluxget-gui" .
       - name: Check Windows and macOS cross-builds
         run: |
           GOOS=windows GOARCH=amd64 go build -o "$RUNNER_TEMP/fluxget.exe" .

@@ -3,7 +3,7 @@
 A Go download manager focused on reliable file transfers, with multi-interface support planned for a later milestone.
 The long-term goal is an IDM-like download manager, starting with a reliable Linux download engine.
 
-**Status:** Early CLI prototype. Sequential and parallel range downloads are implemented on Linux. One live download has been reported successful on Ubuntu; automated checks passed on Linux with Go 1.26.8. Native testing on other operating systems is still pending.
+**Status:** Early CLI and desktop prototypes. Sequential and parallel range downloads are implemented on Linux. The desktop app starts individual downloads through the CLI and displays its own download history; the first desktop preview has been reviewed by the operator. Native testing on other operating systems is still pending.
 
 The first hosted CI run passed formatting, vet, race tests, and Linux/Windows/macOS builds. A local Linux/amd64 build has downloaded and verified a real 30.9 MB file over the internet to ext4; see the roadmap for the test's limits.
 The queue enforces an active-download limit; downloads also use bounded timeouts and retries. Other planned resource limits are documented in the roadmap.
@@ -158,6 +158,21 @@ The checksum verifies that the archive matches a trusted copy of the checksum; i
 
 ## Build
 
+### Desktop prototype (Linux)
+
+The desktop app uses Fyne and the existing CLI. Install Go, GCC, and the Linux graphics development libraries listed in the [Fyne setup guide](https://docs.fyne.io/started/quick/), then build both programs into the same directory:
+
+```bash
+mkdir -p dist
+go build -o dist/fluxget .
+(cd desktop && go build -o ../dist/fluxget-gui .)
+./dist/fluxget-gui
+```
+
+Paste a link and optionally choose a folder and filename. The window shows download history and progress; select a paused or interrupted download to resume it when the server supports safe recovery. Existing files offer **Keep existing file**, **Save another copy**, or **Replace existing file**. Replacement downloads a separate copy first and checks that the original has not changed before replacing it. The CLI executable must remain beside `fluxget-gui`.
+
+The desktop app runs one download at a time. It discovers interrupted standalone CLI checkpoints, including checkpoints from the earlier desktop prototype, but older completed downloads made outside this desktop history are not automatically listed. Desktop history stores URLs under the user configuration directory, so do not use secret-bearing links. Queue management remains available in the CLI.
+
 On Linux or macOS:
 
 ```bash
@@ -256,14 +271,14 @@ Repeatable local single-download and queue experiments are documented in [BENCHM
 - A crash between creating the partial file and saving the initial job record can leave an undiscovered partial file. Parallel recovery may redownload work in an unfinished chunk. Power-loss recovery is not guaranteed.
 - Final-publication recovery requires an explicit `-resume`; legacy checkpoints without a completed-publication record require manual inspection.
 - No simultaneous network-interface use yet.
-- No GUI or browser integration yet.
+- The desktop prototype supports one download at a time; queue management and browser integration are not yet available in the UI. Resuming requires a usable checkpoint and server support.
 - Progress updates occur when data is written, so a stalled connection does not produce regular updates.
 - Public direct URLs are the intended input; credential-bearing links and authenticated website workflows are outside the current scope.
 - Final publication requires hard-link support. Power-loss recovery is not guaranteed.
 
 ## Roadmap
 
-See [project.md](project.md) for the full plan. The next milestones focus on parallel-download recovery, queue improvements, and native platform testing. Multi-interface downloading and a desktop interface follow those foundations.
+See [project.md](project.md) for the full plan. Desktop development now proceeds alongside the CLI; multi-interface downloading remains a separate experimental milestone.
 
 ## License
 
