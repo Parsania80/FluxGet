@@ -26,30 +26,32 @@ const (
 // Counters are per transfer session. They contain no URLs and are never saved
 // as recovery metadata. Duration sums across workers may exceed wall time.
 type transferMeasurements struct {
-	retrying     atomic.Int64
-	accepted     atomic.Int64
-	networkBytes atomic.Int64
-	requests     atomic.Int64
-	failures     atomic.Int64
-	httpErrors   atomic.Int64
-	durations    [metricCount]atomic.Int64
+	retrying      atomic.Int64
+	accepted      atomic.Int64
+	networkBytes  atomic.Int64
+	requests      atomic.Int64
+	failures      atomic.Int64
+	httpErrors    atomic.Int64
+	workerChanges atomic.Int64
+	durations     [metricCount]atomic.Int64
 }
 type measurementSnapshot struct {
-	Retrying     int64 `json:"retrying"`
-	Accepted     int64 `json:"accepted_bytes"`
-	NetworkBytes int64 `json:"network_bytes"`
-	Requests     int64 `json:"requests"`
-	Failures     int64 `json:"request_failures"`
-	HTTPErrors   int64 `json:"http_errors"`
-	BudgetWait   int64 `json:"budget_wait_ns"`
-	HeaderWait   int64 `json:"header_wait_ns"`
-	NetworkRead  int64 `json:"network_read_ns"`
-	LimiterWait  int64 `json:"limiter_wait_ns"`
-	Write        int64 `json:"write_ns"`
-	Sync         int64 `json:"sync_ns"`
-	Checkpoint   int64 `json:"checkpoint_ns"`
-	Verification int64 `json:"verification_ns"`
-	RetryWait    int64 `json:"retry_wait_ns"`
+	Retrying      int64 `json:"retrying"`
+	WorkerChanges int64 `json:"worker_changes"`
+	Accepted      int64 `json:"accepted_bytes"`
+	NetworkBytes  int64 `json:"network_bytes"`
+	Requests      int64 `json:"requests"`
+	Failures      int64 `json:"request_failures"`
+	HTTPErrors    int64 `json:"http_errors"`
+	BudgetWait    int64 `json:"budget_wait_ns"`
+	HeaderWait    int64 `json:"header_wait_ns"`
+	NetworkRead   int64 `json:"network_read_ns"`
+	LimiterWait   int64 `json:"limiter_wait_ns"`
+	Write         int64 `json:"write_ns"`
+	Sync          int64 `json:"sync_ns"`
+	Checkpoint    int64 `json:"checkpoint_ns"`
+	Verification  int64 `json:"verification_ns"`
+	RetryWait     int64 `json:"retry_wait_ns"`
 }
 
 func (m *transferMeasurements) addDuration(k measurementKind, d time.Duration) {
@@ -61,7 +63,7 @@ func (m *transferMeasurements) snapshot() measurementSnapshot {
 	if m == nil {
 		return measurementSnapshot{}
 	}
-	return measurementSnapshot{Retrying: m.retrying.Load(), Accepted: m.accepted.Load(), NetworkBytes: m.networkBytes.Load(), Requests: m.requests.Load(), Failures: m.failures.Load(), HTTPErrors: m.httpErrors.Load(), BudgetWait: m.durations[metricBudgetWait].Load(), HeaderWait: m.durations[metricHeaderWait].Load(), NetworkRead: m.durations[metricNetworkRead].Load(), LimiterWait: m.durations[metricLimiterWait].Load(), Write: m.durations[metricWrite].Load(), Sync: m.durations[metricSync].Load(), Checkpoint: m.durations[metricCheckpoint].Load(), Verification: m.durations[metricVerification].Load(), RetryWait: m.durations[metricRetryWait].Load()}
+	return measurementSnapshot{Retrying: m.retrying.Load(), WorkerChanges: m.workerChanges.Load(), Accepted: m.accepted.Load(), NetworkBytes: m.networkBytes.Load(), Requests: m.requests.Load(), Failures: m.failures.Load(), HTTPErrors: m.httpErrors.Load(), BudgetWait: m.durations[metricBudgetWait].Load(), HeaderWait: m.durations[metricHeaderWait].Load(), NetworkRead: m.durations[metricNetworkRead].Load(), LimiterWait: m.durations[metricLimiterWait].Load(), Write: m.durations[metricWrite].Load(), Sync: m.durations[metricSync].Load(), Checkpoint: m.durations[metricCheckpoint].Load(), Verification: m.durations[metricVerification].Load(), RetryWait: m.durations[metricRetryWait].Load()}
 }
 
 type measurementContextKey struct{}
@@ -131,6 +133,10 @@ func (s *observationSampler) sample(now time.Time, current measurementSnapshot, 
 	if current.Retrying > 0 || current.RetryWait > s.baseline.RetryWait || current.Failures > s.baseline.Failures || current.HTTPErrors > s.baseline.HTTPErrors {
 		o.Valid = false
 		o.Reason = "retry or request error"
+	}
+	if current.WorkerChanges != s.baseline.WorkerChanges {
+		o.Valid = false
+		o.Reason = "worker count changed"
 	}
 	s.at = now
 	s.baseline = current

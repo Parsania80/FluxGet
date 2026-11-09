@@ -37,6 +37,8 @@ func segmentState(state string) string {
 		return "Canceled"
 	case "failed":
 		return "Failed"
+	case "retiring":
+		return "Saving before stopping"
 	default:
 		return "Checking"
 	}
@@ -66,9 +68,16 @@ func segmentSummary(j queueEntry) string {
 	}
 	active := 0
 	for _, part := range j.Segments {
-		if part.State == "connecting" || part.State == "downloading" {
+		if part.State == "connecting" || part.State == "downloading" || part.State == "retiring" || part.State == "verifying" {
 			active++
 		}
+	}
+	if j.WorkerTarget > 0 {
+		text := fmt.Sprintf("%d parts · %d active · target %d · maximum %d", len(j.Segments), active, j.WorkerTarget, j.ConnectionLimit)
+		if j.WorkerReason != "" {
+			text += " · " + j.WorkerReason
+		}
+		return text
 	}
 	return fmt.Sprintf("%d parts · %d active · connection limit %d", len(j.Segments), active, j.ConnectionLimit)
 }

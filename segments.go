@@ -16,9 +16,11 @@ type transferSegment struct {
 	State      string `json:"state"`
 }
 type segmentSnapshot struct {
-	Mode  string            `json:"transfer_mode"`
-	Limit int               `json:"connection_limit"`
-	Parts []transferSegment `json:"segments"`
+	Mode   string            `json:"transfer_mode"`
+	Limit  int               `json:"connection_limit"`
+	Parts  []transferSegment `json:"segments"`
+	Target int               `json:"worker_target,omitempty"`
+	Reason string            `json:"worker_reason,omitempty"`
 }
 type segmentObserver interface{ ReportSegments(segmentSnapshot) }
 
@@ -53,6 +55,7 @@ type segmentPart struct {
 	start, end int64
 	received   atomic.Int64
 	state      atomic.Int32
+	retiring   atomic.Bool
 }
 
 func (p *segmentPart) setState(state int32) {
@@ -74,7 +77,7 @@ func (p *segmentPart) add(n int64) {
 type segmentSession struct {
 	observer segmentObserver
 	mode     string
-	limit    int
+	workers  atomic.Pointer[workerSettings]
 	parts    []*segmentPart
 	stop     chan struct{}
 	done     chan struct{}
@@ -85,7 +88,8 @@ func newSegmentSession(output io.Writer, mode string, limit int, ranges []transf
 	if !ok {
 		return nil
 	}
-	s := &segmentSession{observer: observer, mode: mode, limit: limit, stop: make(chan struct{}), done: make(chan struct{})}
+	s := &segmentSession{observer: observer, mode: mode, stop: make(chan struct{}), done: make(chan struct{})}
+	s.workers.Store(&workerSettings{Maximum: limit, Target: limit})
 	for _, r := range ranges {
 		p := &segmentPart{start: r.Start, end: r.End}
 		p.received.Store(r.Downloaded)
@@ -123,7 +127,8 @@ func (s *segmentSession) publish() {
 	if s == nil {
 		return
 	}
-	snapshot := segmentSnapshot{Mode: s.mode, Limit: s.limit, Parts: make([]transferSegment, len(s.parts))}
+	workers := s.workers.Load()
+	snapshot := segmentSnapshot{Mode: s.mode, Limit: workers.Maximum, Target: workers.Target, Reason: workers.Reason, Parts: make([]transferSegment, len(s.parts))}
 	for i, p := range s.parts {
 		n, state := p.received.Load(), p.state.Load()
 		end := p.end
@@ -137,6 +142,9 @@ func (s *segmentSession) publish() {
 			n = end - p.start
 		}
 		snapshot.Parts[i] = transferSegment{Start: p.start, End: end, Downloaded: n, State: segmentStates[state]}
+		if p.retiring.Load() {
+			snapshot.Parts[i].State = "retiring"
+		}
 	}
 	s.observer.ReportSegments(snapshot)
 }

@@ -242,7 +242,7 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool)
 	total, origin := widget.NewEntry(), widget.NewEntry()
 	total.SetText(fmt.Sprint(policy.Total))
 	origin.SetText(fmt.Sprint(policy.PerOrigin))
-	managementNote := widget.NewLabel("Automatic shares connection slots across your downloads. Customize the limits below if needed. Performance and hardware tuning are not available yet.")
+	managementNote := widget.NewLabel("Automatic starts with one worker per file and shares connection slots across downloads. Manual uses your connection maximum. Parallel worker limits can change during a transfer; saved part boundaries stay fixed. Speed-based selection and hardware tuning are not available yet.")
 	managementNote.Wrapping = fyne.TextWrapWord
 	mode.OnChanged = func(value string) {
 		if value == "Automatic" {
@@ -347,7 +347,7 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool)
 			perDownload.Text = "Per download (" + inputUnit + "/s)"
 			allDownloads.Text = "All downloads (" + inputUnit + "/s)"
 			limits.Refresh()
-			result.SetText("Saved. Request budgets and speed limits apply now; connection-count changes apply to the next transfer.")
+			result.SetText("Saved. Parallel worker limits, request budgets, and speed limits apply now. Extra workers save their progress before stopping; sequential transfers keep one worker.")
 			if onSaved != nil {
 				onSaved()
 			}

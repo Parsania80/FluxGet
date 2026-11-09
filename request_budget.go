@@ -224,13 +224,17 @@ func (t *requestTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	t.metrics.addDuration(metricHeaderWait, time.Since(started))
 	if err != nil {
 		lease.release()
-		t.metrics.failures.Add(1)
+		if req.Context().Err() == context.Canceled {
+			err = context.Canceled
+		} else {
+			t.metrics.failures.Add(1)
+		}
 		return nil, err
 	}
 	if response.StatusCode >= 400 {
 		t.metrics.httpErrors.Add(1)
 	}
-	body := &measuredRequestBody{ReadCloser: response.Body, lease: lease, metrics: t.metrics}
+	body := &measuredRequestBody{ReadCloser: response.Body, lease: lease, metrics: t.metrics, ctx: req.Context()}
 	body.stop = context.AfterFunc(req.Context(), func() { body.close() })
 	response.Body = body
 	return response, nil
@@ -248,6 +252,7 @@ type measuredRequestBody struct {
 	stop    func() bool
 	once    sync.Once
 	err     error
+	ctx     context.Context
 }
 
 func (b *measuredRequestBody) Read(p []byte) (int, error) {
@@ -256,7 +261,11 @@ func (b *measuredRequestBody) Read(p []byte) (int, error) {
 	b.metrics.addDuration(metricNetworkRead, time.Since(start))
 	b.metrics.networkBytes.Add(int64(n))
 	if err != nil {
-		if !errors.Is(err, io.EOF) {
+		// A canceled HTTP/2 stream can report a closed body instead of cancellation.
+		if b.ctx != nil && b.ctx.Err() == context.Canceled {
+			err = context.Canceled
+		}
+		if !errors.Is(err, io.EOF) && (b.ctx == nil || b.ctx.Err() != context.Canceled) {
 			b.metrics.failures.Add(1)
 		}
 		b.lease.release()

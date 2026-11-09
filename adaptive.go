@@ -3,7 +3,7 @@ package main
 import "time"
 
 // Stage 1 evaluates this policy in deterministic simulations only. Applying its
-// worker targets awaits safe live resizing; the request broker is active now.
+// worker decisions awaits stage 3; stage 2 supplies safe live resizing.
 type adaptiveInput struct {
 	At               time.Time
 	Window           transferObservation

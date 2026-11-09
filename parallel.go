@@ -167,6 +167,15 @@ func parallelDownload(ctx context.Context, client *http.Client, rawURL, destinat
 		return 0, fmt.Errorf("identify partial file: %w", err)
 	}
 	c := checkpoint{Version: 4, URL: rawURL, ResolvedURL: rep.url, Destination: absolute, Partial: absolute + ".part", ETag: rep.etag, Total: &rep.size, ExpectedSHA256: checksum, State: "downloading", PartialIdentity: identity, PartialToken: createPartialToken(partial)}
+	if control := workerControlFrom(ctx); control != nil {
+		workers = control.settings.Load().Maximum
+		if budget, ok := ctx.Value(budgetContextKey{}).(*requestBudget); ok {
+			policy, _ := budget.snapshot()
+			if policy.Policy.Mode == "automatic" {
+				workers = min(workers, max(1, int(rep.size/(256<<10))))
+			}
+		}
+	}
 	size := rep.size / int64(workers)
 	for i := 0; i < workers; i++ {
 		start := int64(i) * size
@@ -231,47 +240,39 @@ func runChunks(ctx context.Context, client *http.Client, path string, partial *o
 	if progress != nil {
 		fmt.Fprintf(progress, "Downloaded %d/%d bytes (%.1f%%)\n", c.Completed, rep.size, float64(c.Completed)*100/float64(rep.size))
 	}
-	pending := 0
-	slots := make(chan struct{}, connections)
+	control := workerControlFrom(ctx)
+	if control == nil {
+		control = newWorkerControl(connections, connections)
+	}
+	type rangeWorker struct {
+		cancel   context.CancelFunc
+		retiring bool
+	}
+	active := make(map[int]*rangeWorker)
 	rawURL := c.URL
-	for i, chunk := range c.Chunks {
-		if chunk.SHA256 != "" {
-			continue
-		}
-		pending++
-		i, chunk := i, chunk
+	launch := func(i int) {
+		chunk := c.Chunks[i]
 		part := segments.part(i)
+		part.setReceived(chunk.savedLength())
+		part.setState(segmentConnecting)
+		partCtx, stop := context.WithCancel(workerCtx)
+		active[i] = &rangeWorker{cancel: stop}
+		if m := measurementsFrom(ctx); m != nil {
+			m.workerChanges.Add(1)
+		}
 		go func() {
-			var err error
-			var downloaded int64
-			var digest string
 			report := func(n int64, sum string) error {
 				update := rangeCheckpoint{index: i, downloaded: n, digest: sum, done: make(chan error, 1)}
-				// The owner drains reports even after cancellation, so a clean
-				// pause can retain the last bytes written by every worker.
+				// Keep draining reports after cancellation to save final prefixes.
 				checkpoints <- update
 				return <-update.done
 			}
-			select {
-			case slots <- struct{}{}:
-				part.setState(segmentConnecting)
-				downloaded, digest, err = fetchRange(workerCtx, client, rawURL, partial, chunk, rep, &count, part, report)
-				if err == nil {
-					part.setState(segmentVerifying)
-				}
-				<-slots
-			case <-workerCtx.Done():
-				err = workerCtx.Err()
+			n, digest, err := fetchRange(partCtx, client, rawURL, partial, chunk, rep, &count, part, report)
+			if err == nil {
+				part.setState(segmentVerifying)
 			}
-			if err != nil {
-				if workerCtx.Err() != nil {
-					part.setState(segmentPaused)
-				} else {
-					part.setState(segmentFailed)
-				}
-				cancel()
-			}
-			results <- rangeResult{index: i, downloaded: downloaded, digest: digest, err: err}
+			stop()
+			results <- rangeResult{index: i, downloaded: n, digest: digest, err: err}
 		}()
 	}
 	done := make(chan struct{})
@@ -319,16 +320,84 @@ func runChunks(ctx context.Context, client *http.Client, path string, partial *o
 		c = updated
 		return nil
 	}
-	for remaining := pending; remaining > 0; {
+	ctxDone := ctx.Done()
+	for {
+		settings := *control.settings.Load()
+		requestedTarget := settings.Target
+		target := min(requestedTarget, len(c.Chunks))
+		settings.Target = target
+		if target < requestedTarget {
+			settings.Reason = "Limited by saved part layout"
+		}
+		if workerCtx.Err() == nil {
+			running := 0
+			for _, worker := range active {
+				if !worker.retiring {
+					running++
+				}
+			}
+			for i := len(c.Chunks) - 1; running > target && i >= 0; i-- {
+				if worker := active[i]; worker != nil && !worker.retiring {
+					worker.retiring = true
+					if part := segments.part(i); part != nil {
+						part.retiring.Store(true)
+					}
+					if m := measurementsFrom(ctx); m != nil {
+						m.workerChanges.Add(1)
+					}
+					worker.cancel()
+					running--
+				}
+			}
+			for i, chunk := range c.Chunks {
+				if len(active) >= target {
+					break
+				}
+				if chunk.SHA256 == "" && active[i] == nil {
+					launch(i)
+				}
+			}
+		}
+		for _, worker := range active {
+			if worker.retiring {
+				settings.Reason = "Reducing active connections…"
+			}
+		}
+		if segments != nil {
+			segments.workers.Store(&settings)
+			segments.publish()
+		}
+		if len(active) == 0 {
+			break
+		}
 		select {
+		case <-ctxDone:
+			ctxDone = nil
+			cancel()
+		case <-control.changed:
 		case update := <-checkpoints:
 			update.done <- persistRange(update.index, update.downloaded, update.digest, false)
 		case result := <-results:
-			remaining--
+			worker := active[result.index]
+			delete(active, result.index)
+			if part := segments.part(result.index); part != nil {
+				part.retiring.Store(false)
+			}
 			if result.err != nil {
+				if worker.retiring && onlyCancellation(result.err) {
+					// The writer has stopped and acknowledged its last durable prefix.
+					count.Add(c.Chunks[result.index].savedLength() - result.downloaded)
+					segments.part(result.index).setReceived(c.Chunks[result.index].savedLength())
+					segments.part(result.index).setState(segmentWaiting)
+					if m := measurementsFrom(ctx); m != nil {
+						m.workerChanges.Add(1)
+					}
+					continue
+				}
 				if firstErr == nil || (errors.Is(firstErr, context.Canceled) && !errors.Is(result.err, context.Canceled)) {
 					firstErr = result.err
 				}
+				segments.part(result.index).setState(segmentFailed)
 				cancel()
 				continue
 			}
@@ -421,6 +490,9 @@ func fetchRange(ctx context.Context, client *http.Client, rawURL string, partial
 	saved := chunk.savedLength()
 	if _, err := hashTransferRange(ctx, partial, chunk.Start, saved, digest); err != nil {
 		return saved, "", err
+	}
+	if saved > 0 && !strings.EqualFold(hex.EncodeToString(digest.Sum(nil)), chunk.savedDigest()) {
+		return saved, "", errors.New("saved chunk prefix changed before worker restart")
 	}
 	start, end := chunk.Start+saved, chunk.End-1
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)

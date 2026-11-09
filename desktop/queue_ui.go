@@ -21,6 +21,8 @@ type queueEntry struct {
 	Segments        []downloadSegment    `json:"segments,omitempty"`
 	TransferMode    string               `json:"transfer_mode,omitempty"`
 	ConnectionLimit int                  `json:"connection_limit,omitempty"`
+	WorkerTarget    int                  `json:"worker_target,omitempty"`
+	WorkerReason    string               `json:"worker_reason,omitempty"`
 	Requests        *jobBudgetSnapshot   `json:"requests,omitempty"`
 	Measurements    *measurementSnapshot `json:"measurements,omitempty"`
 }

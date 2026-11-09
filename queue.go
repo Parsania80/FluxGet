@@ -126,6 +126,7 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 		}
 	}
 	active := make(map[int]context.CancelFunc)
+	workerControls := make(map[int]*workerControl)
 	requested := make(map[int]string)
 	started, stopping, desktopInitialized := false, false, false
 	ctxDone := ctx.Done()
@@ -190,6 +191,14 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 				delete(observations, job.ID)
 				workerCtx = context.WithValue(workerCtx, measurementContextKey{}, m)
 				workerCtx = context.WithValue(workerCtx, budgetContextKey{}, budget)
+				policy, _ := budget.snapshot()
+				target := connections
+				if policy.Policy.Mode == "automatic" {
+					target = 1
+				}
+				control := newWorkerControl(connections, target)
+				workerControls[job.ID] = control
+				workerCtx = context.WithValue(workerCtx, workerControlKey{}, control)
 				active[job.ID] = cancel
 				writer := &queueProgressWriter{id: job.ID, updates: updates}
 				progressWriters[job.ID] = writer
@@ -257,6 +266,7 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 			}
 			active[result.id]()
 			delete(active, result.id)
+			delete(workerControls, result.id)
 			delete(progressWriters, result.id)
 			delete(speeds, result.id)
 			i := find(result.id)
@@ -327,6 +337,17 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 				changed := false
 				if requestErr == nil {
 					switch req.Operation {
+					case "workers":
+						i := find(req.Job.ID)
+						control := workerControls[req.Job.ID]
+						if i < 0 || q.Jobs[i].State != "running" || requested[req.Job.ID] != "" || control == nil {
+							requestErr = errors.New("worker targets require an active download")
+						} else {
+							requestErr = control.set(control.settings.Load().Maximum, req.Connections)
+							if requestErr == nil {
+								generation++
+							}
+						}
 					case "action":
 						i := find(req.Job.ID)
 						if i < 0 {
@@ -407,11 +428,23 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 						if req.MaxActive < 1 || req.MaxActive > 64 || req.Connections < 1 || req.Connections > 16 {
 							requestErr = errors.New("simultaneous downloads must be 1–64 and connections 1–16")
 						} else {
+							previousPolicy, _ := budget.snapshot()
 							if req.Management != nil {
 								requestErr = budget.configure(*req.Management)
 							}
 							if requestErr == nil {
 								maxActive, connections = req.MaxActive, req.Connections
+								policy, _ := budget.snapshot()
+								for _, control := range workerControls {
+									target := connections
+									if policy.Policy.Mode == "automatic" {
+										target = min(control.settings.Load().Target, connections)
+										if previousPolicy.Policy.Mode != "automatic" {
+											target = 1
+										}
+									}
+									_ = control.set(connections, target)
+								}
 								generation++
 							}
 						}
@@ -756,6 +789,9 @@ func onlyCancellation(err error) bool {
 			}
 		}
 		return true
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return onlyCancellation(wrapped.Unwrap())
 	}
 	return errors.Is(err, context.Canceled)
 }
