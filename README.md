@@ -1,5 +1,7 @@
 # FluxGet
 
+<img src="desktop/assets/fluxget.png" alt="FluxGet icon" width="96">
+
 A Go download manager focused on reliable file transfers, with multi-interface support planned for a later milestone.
 The long-term goal is an IDM-like download manager, starting with a reliable Linux download engine.
 
@@ -18,6 +20,8 @@ Go 1.26.8 is installed for the current Linux user under `~/.local/share/go1.26.8
 For learning-focused development, activate VibeWise with `$vibe-wise:learn` in Codex.
 
 ## Current features
+
+- Automatic desktop request budgets with optional customization; transfer measurements prepare for later adaptive tuning.
 
 - Download a direct HTTP or HTTPS URL to a user-selected destination.
 - Stream response bytes to disk without holding the entire file in memory.
@@ -165,7 +169,7 @@ The checksum verifies that the archive matches a trusted copy of the checksum; i
 
 The desktop app uses Fyne and the existing CLI. Install Go, GCC, and the Linux graphics development libraries listed in the [Fyne setup guide](https://docs.fyne.io/started/quick/), then build both programs into the same directory:
 
-On the current Ubuntu machine, a user-local preview is installed under `~/.local/opt/fluxget` and can be opened from the applications menu as **FluxGet**. The desktop executable and CLI must remain together.
+On the current Ubuntu machine, a user-local preview is installed under `~/.local/opt/fluxget` and can be opened from the applications menu as **FluxGet**. The desktop executable and CLI must remain together. The desktop embeds its own FluxGet icon from `desktop/assets/fluxget.png`. Linux launcher metadata is in `packaging/linux/io.github.parsania80.fluxget.desktop`; icon source and installation notes are in `desktop/assets/README.md`.
 
 ```bash
 mkdir -p dist
@@ -178,7 +182,7 @@ Paste a link and optionally choose a folder and filename. The window shows downl
 
 The Downloads tab has one list with All downloads, Downloading, Waiting, Paused, Completed, and Failed filters. Choose **Add download**, enter a link and optional folder/filename, then choose **Download now** or **Download later**. Download now starts automatically when a slot is free; extra downloads show Waiting. Download later stays paused until you select it and choose Resume. Known-size rows show their own progress; active rows show speed and an approximate remaining time when those values are available. Unknown totals have no invented percentage. Use the row's **Limit** button to change its speed. A custom limit also shows a **Remove limit** button beside it; click it to return immediately to the Settings limits. In the editor, **Use custom speed limit** turns the custom ceiling on or off, and **Apply** saves the change. You do not need to enter 0. The default per-download and shared overall ceilings still apply after removing a custom limit.
 
-Download progress and the separate **Speed** label use **MB** and **MB/s** by default. Change **Settings → Display → Data unit** to **KB**, **MB**, or **GB**, then choose **Save settings**. The choice is remembered and also applies to speed-limit controls. These are decimal units: 1 MB is 1,000 KB, and 1 GB is 1,000 MB. Changing units preserves existing speed limits; new fractional limits are rounded down to the engine's supported precision. Small values keep extra decimal places instead of disappearing as zero.
+Download progress and the separate **Speed** label use **MB** and **MB/s** by default. Change **Settings → Display → Data unit** to **KB**, **MB**, or **GB**, then choose **Save settings**. The choice is remembered and also applies to speed-limit controls. These are decimal units: 1 MB is 1,000 KB, and 1 GB is 1,000 MB. Changing units preserves existing speed limits; new fractional limits are rounded down to the engine's supported precision. The engine stores whole KiB/s: entering 1 MB/s gives approximately 0.999424 MB/s internally. Editors show a short decimal such as 1 when it saves back to exactly the same stored limit, so reopening does not expose unnecessary digits or change the cap. Small values keep extra decimal places instead of disappearing as zero.
 
 Speed measures recent progress for that download, combining its parallel connections and excluding bytes saved before a resume. Measurements normally update about once per second; after 2.5 seconds without new progress, the speed shows zero. Paused, waiting, and completed rows show a dash. Remaining-time estimates use this recent speed.
 
@@ -186,7 +190,7 @@ Each download also shows separate progress bars for its actual file parts, with 
 
 Select a download to Pause, Resume, Retry, Open file, or Show in folder. More contains Cancel (keep files), Remove from history, and the separate confirmed Delete saved partial data action. Removal keeps files, while partial deletion uses the engine's ownership checks. The desktop starts its scheduler automatically; there is no separate Queue tab or manual Open/Start step. Closing the window waits for active transfers to stop safely. On reopening, previously active and waiting jobs are paused until explicitly resumed.
 
-Settings holds the simultaneous-download limit, connections per download, default folder, and speed limits. All desktop downloads share the same active-download limit. Lowering the limit lets current transfers finish before starting additional ones; connection changes apply to subsequent transfers. An existing CLI queue must be closed before the desktop can own the scheduler; FluxGet reports this conflict rather than starting another owner.
+Settings holds the simultaneous-download limit, connections per download, default folder, and speed limits. Simultaneous downloads controls how many files run together; connections per download controls how many part requests may run within each file. For example, three files with four workers each can run up to twelve part requests, sharing available bandwidth. **Automatic is the desktop default.** It shares up to 8 active requests in total and 4 to one server, within the file/worker maximums. Most users can leave these alone. Open **Settings → Customize download management** to change the limits or select **Manual**; your explicit choice is remembered. Existing settings without a mode become Automatic and retain their previous limits. Stage 1 now collects transfer measurements and enforces request budgets; speed-based worker resizing and CPU/memory/storage tuning are not implemented yet. See the [Automatic design and implementation stages](project.md#automatic-mode-design-2026-11-09-stage-1-implemented). Parallel requests are not necessarily separate TCP connections when the HTTP protocol supports multiplexing. All desktop downloads share the same active-download limit. Lowering the limit lets current transfers finish before starting additional ones; connection-count changes apply to subsequent transfers. Request-budget changes apply immediately to new admissions; existing over-limit requests drain safely. Settings show Saved only after the scheduler accepts the configuration and it is stored. A row waiting for budget capacity shows Waiting for a connection slot. An existing CLI queue must be closed before the desktop can own the scheduler; FluxGet reports this conflict rather than starting another owner.
 
 Automatic desktop filenames use a safe name from the actual server response or range probe, with the URL name as fallback. Explicit names take precedence. If a server-selected name conflicts, the failed row explains the problem and offers the same Keep existing file, Save another copy, and Replace existing file choices. Destination reservations and exclusive file creation protect other jobs and existing files.
 

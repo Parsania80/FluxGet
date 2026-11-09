@@ -90,14 +90,27 @@ func withRetries(ctx context.Context, initialDelay time.Duration, attempt func()
 		if errors.As(err, &status) && status.retryAfter > delay {
 			delay = status.retryAfter
 		}
+		m := measurementsFrom(ctx)
+		if m != nil {
+			m.retrying.Add(1)
+		}
+		waitStarted := time.Now()
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			if m != nil {
+				m.retrying.Add(-1)
+			}
+			measurementsFrom(ctx).addDuration(metricRetryWait, time.Since(waitStarted))
 			if !timer.Stop() {
 				<-timer.C
 			}
 			return ctx.Err()
 		case <-timer.C:
+			if m != nil {
+				m.retrying.Add(-1)
+			}
+			measurementsFrom(ctx).addDuration(metricRetryWait, time.Since(waitStarted))
 		}
 	}
 }

@@ -142,44 +142,44 @@ func downloadNamed(ctx context.Context, client *http.Client, rawURL string, dest
 				saved.ETag = response.Header.Get("ETag")
 			}
 		}
-		if err := saveCheckpoint(checkpointPath, partial, *saved); err != nil {
+		if err := saveTransferCheckpoint(ctx, checkpointPath, partial, *saved); err != nil {
 			return 0, fmt.Errorf("save active job state; partial file kept: %w", err)
 		}
 	}
 
 	// Copy streams through bounded buffering rather than retaining the whole file.
 	hash := sha256.New()
-	tracker := &progressWriter{writer: io.MultiWriter(partial, hash), output: progress, total: response.ContentLength, start: time.Now()}
+	tracker := &progressWriter{writer: io.MultiWriter(measuredFileWriter{partial, measurementsFrom(ctx)}, hash), output: progress, total: response.ContentLength, start: time.Now()}
 	segments := newSegmentSession(progress, "sequential", 1, []transferSegment{{Start: 0, End: response.ContentLength, State: "downloading"}})
 	complete := false
 	defer func() { segments.finish(ctx, complete) }()
 	tracker.segment = segments.part(0)
 	tracker.segments = segments
 	if saved != nil && saved.Total != nil {
-		tracker.checkpoint = checkpointProgress(checkpointPath, partial, saved, hash, 0)
+		tracker.checkpoint = checkpointProgressObserved(ctx, checkpointPath, partial, saved, hash, 0)
 	}
 	tracker.report()
 	written, err := io.Copy(tracker, response.Body)
 	tracker.report()
 	if err != nil {
-		return written, errors.Join(fmt.Errorf("transfer failed; partial data kept at %q: %w", partialPath, err), saveInterrupted(checkpointPath, partial, saved, written))
+		return written, errors.Join(fmt.Errorf("transfer failed; partial data kept at %q: %w", partialPath, err), saveInterruptedObserved(ctx, checkpointPath, partial, saved, written))
 	}
 	if response.ContentLength >= 0 && written != response.ContentLength {
-		return written, errors.Join(fmt.Errorf("incomplete response; partial data kept at %q: %w", partialPath, io.ErrUnexpectedEOF), saveInterrupted(checkpointPath, partial, saved, written))
+		return written, errors.Join(fmt.Errorf("incomplete response; partial data kept at %q: %w", partialPath, io.ErrUnexpectedEOF), saveInterruptedObserved(ctx, checkpointPath, partial, saved, written))
 	}
 	if err := ctx.Err(); err != nil {
-		return written, errors.Join(fmt.Errorf("download canceled; partial data kept at %q: %w", partialPath, err), saveInterrupted(checkpointPath, partial, saved, written))
+		return written, errors.Join(fmt.Errorf("download canceled; partial data kept at %q: %w", partialPath, err), saveInterruptedObserved(ctx, checkpointPath, partial, saved, written))
 	}
 	if expected != nil && !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), expectedSHA256) {
 		return written, fmt.Errorf("SHA-256 mismatch; partial data kept at %q", partialPath)
 	}
 	tracker.segment.setState(segmentVerifying)
 	segments.publish()
-	if err := partial.Sync(); err != nil {
+	if err := syncTransferFile(ctx, partial); err != nil {
 		return written, fmt.Errorf("sync partial file %q: %w", partialPath, err)
 	}
 	if saved != nil {
-		if err := saveReadyCheckpoint(checkpointPath, partial, saved, written, hash); err != nil {
+		if err := saveReadyCheckpointObserved(ctx, checkpointPath, partial, saved, written, hash); err != nil {
 			return written, err
 		}
 	}

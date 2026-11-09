@@ -6,21 +6,23 @@ import (
 )
 
 type queueEntry struct {
-	ID              int               `json:"id"`
-	URL             string            `json:"url,omitempty"`
-	State           string            `json:"state"`
-	Destination     string            `json:"destination"`
-	AutomaticName   bool              `json:"automatic_name,omitempty"`
-	ExpectedSHA256  string            `json:"expected_sha256,omitempty"`
-	Message         string            `json:"message,omitempty"`
-	Progress        string            `json:"progress,omitempty"`
-	Conflict        string            `json:"conflict,omitempty"`
-	OutputPath      string            `json:"output_path,omitempty"`
-	SavedProgress   *float64          `json:"saved_progress,omitempty"`
-	Speed           *float64          `json:"speed_bytes_per_second,omitempty"`
-	Segments        []downloadSegment `json:"segments,omitempty"`
-	TransferMode    string            `json:"transfer_mode,omitempty"`
-	ConnectionLimit int               `json:"connection_limit,omitempty"`
+	ID              int                  `json:"id"`
+	URL             string               `json:"url,omitempty"`
+	State           string               `json:"state"`
+	Destination     string               `json:"destination"`
+	AutomaticName   bool                 `json:"automatic_name,omitempty"`
+	ExpectedSHA256  string               `json:"expected_sha256,omitempty"`
+	Message         string               `json:"message,omitempty"`
+	Progress        string               `json:"progress,omitempty"`
+	Conflict        string               `json:"conflict,omitempty"`
+	OutputPath      string               `json:"output_path,omitempty"`
+	SavedProgress   *float64             `json:"saved_progress,omitempty"`
+	Speed           *float64             `json:"speed_bytes_per_second,omitempty"`
+	Segments        []downloadSegment    `json:"segments,omitempty"`
+	TransferMode    string               `json:"transfer_mode,omitempty"`
+	ConnectionLimit int                  `json:"connection_limit,omitempty"`
+	Requests        *jobBudgetSnapshot   `json:"requests,omitempty"`
+	Measurements    *measurementSnapshot `json:"measurements,omitempty"`
 }
 
 func (j queueEntry) output() string {
@@ -49,6 +51,13 @@ func downloadState(state string) string {
 	default:
 		return state
 	}
+}
+
+func (j queueEntry) displayState() string {
+	if j.State == "running" && j.Requests != nil && j.Requests.Active == 0 && j.Requests.Waiting > 0 {
+		return "Waiting"
+	}
+	return downloadState(j.State)
 }
 
 func jobVisible(category, state string) bool {
@@ -86,7 +95,7 @@ func downloadRows(entries []queueEntry, history []job, category string) []downlo
 		if index >= 0 && history[index].State == "Needs attention" {
 			entry.State, entry.Message = "Needs attention", history[index].Message
 		}
-		if jobVisible(category, entry.State) {
+		if jobVisible(category, entry.displayState()) {
 			rows = append(rows, downloadRow{fmt.Sprintf("queue:%d", entry.ID), entry, index})
 		}
 	}
@@ -96,7 +105,7 @@ func downloadRows(entries []queueEntry, history []job, category string) []downlo
 		}
 		entry := queueEntry{URL: h.URL, Destination: h.Path, State: h.State, Message: h.Message}
 		entry.SavedProgress = h.Progress
-		if jobVisible(category, entry.State) {
+		if jobVisible(category, entry.displayState()) {
 			rows = append(rows, downloadRow{fmt.Sprintf("download:%d", i), entry, i})
 		}
 	}

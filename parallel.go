@@ -176,7 +176,7 @@ func parallelDownload(ctx context.Context, client *http.Client, rawURL, destinat
 		}
 		c.Chunks = append(c.Chunks, savedChunk{Start: start, End: end})
 	}
-	if err := saveCheckpoint(cp, partial, c); err != nil {
+	if err := saveTransferCheckpoint(ctx, cp, partial, c); err != nil {
 		return 0, fmt.Errorf("save active job state; partial file kept: %w", err)
 	}
 	return runChunks(ctx, client, cp, partial, c, checksum, progress, workers)
@@ -188,8 +188,11 @@ func chunkDigest(partial *os.File, chunk savedChunk) (string, error) {
 }
 
 func chunkPrefixDigest(partial *os.File, chunk savedChunk) (string, error) {
+	return chunkPrefixDigestObserved(context.Background(), partial, chunk)
+}
+func chunkPrefixDigestObserved(ctx context.Context, partial *os.File, chunk savedChunk) (string, error) {
 	hash := sha256.New()
-	if _, err := io.CopyN(hash, io.NewSectionReader(partial, chunk.Start, chunk.savedLength()), chunk.savedLength()); err != nil {
+	if _, err := hashTransferRange(ctx, partial, chunk.Start, chunk.savedLength(), hash); err != nil {
 		return "", fmt.Errorf("hash chunk: %w", err)
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
@@ -308,7 +311,7 @@ func runChunks(ctx context.Context, client *http.Client, path string, partial *o
 			part.SHA256, part.PrefixSHA256 = digest, ""
 		}
 		updated.Completed += n - old.savedLength()
-		if err := saveCheckpoint(path, partial, updated); err != nil {
+		if err := saveTransferCheckpoint(ctx, path, partial, updated); err != nil {
 			checkpointErr = fmt.Errorf("save chunk progress: %w", err)
 			cancel()
 			return checkpointErr
@@ -345,7 +348,7 @@ func runChunks(ctx context.Context, client *http.Client, path string, partial *o
 	if firstErr != nil || checkpointErr != nil {
 		if checkpointErr == nil {
 			c.State = "interrupted"
-			if err := saveCheckpoint(path, partial, c); err != nil {
+			if err := saveTransferCheckpoint(ctx, path, partial, c); err != nil {
 				checkpointErr = fmt.Errorf("save interrupted state: %w", err)
 			}
 		}
@@ -355,13 +358,13 @@ func runChunks(ctx context.Context, client *http.Client, path string, partial *o
 		return c.Completed, fmt.Errorf("truncate completed partial: %w", err)
 	}
 	hash := sha256.New()
-	if _, err := io.CopyN(hash, io.NewSectionReader(partial, 0, rep.size), rep.size); err != nil {
+	if _, err := hashTransferRange(ctx, partial, 0, rep.size, hash); err != nil {
 		return c.Completed, fmt.Errorf("hash downloaded file: %w", err)
 	}
 	if checksum != "" && !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), checksum) {
 		return c.Completed, errors.New("SHA-256 mismatch; partial data kept")
 	}
-	if err := saveReadyCheckpoint(path, partial, &c, rep.size, hash); err != nil {
+	if err := saveReadyCheckpointObserved(ctx, path, partial, &c, rep.size, hash); err != nil {
 		return c.Completed, err
 	}
 	if err := partial.Close(); err != nil {
@@ -391,7 +394,7 @@ func resumeChunks(ctx context.Context, client *http.Client, path string, partial
 		if chunk.savedLength() == 0 {
 			continue
 		}
-		digest, err := chunkPrefixDigest(partial, chunk)
+		digest, err := chunkPrefixDigestObserved(ctx, partial, chunk)
 		if err != nil || !strings.EqualFold(digest, chunk.savedDigest()) {
 			return c.Completed, errors.New("saved chunk does not match checkpoint")
 		}
@@ -407,7 +410,7 @@ func resumeChunks(ctx context.Context, client *http.Client, path string, partial
 	}
 	c.State = "downloading"
 	c.ExpectedSHA256 = checksum
-	if err := saveCheckpoint(path, partial, c); err != nil {
+	if err := saveTransferCheckpoint(ctx, path, partial, c); err != nil {
 		return c.Completed, fmt.Errorf("save active job state: %w", err)
 	}
 	return runChunks(ctx, client, path, partial, c, checksum, progress, connections)
@@ -416,7 +419,7 @@ func resumeChunks(ctx context.Context, client *http.Client, path string, partial
 func fetchRange(ctx context.Context, client *http.Client, rawURL string, partial *os.File, chunk savedChunk, rep representation, count *atomic.Int64, part *segmentPart, report func(int64, string) error) (int64, string, error) {
 	digest := sha256.New()
 	saved := chunk.savedLength()
-	if _, err := io.CopyN(digest, io.NewSectionReader(partial, chunk.Start, saved), saved); err != nil {
+	if _, err := hashTransferRange(ctx, partial, chunk.Start, saved, digest); err != nil {
 		return saved, "", err
 	}
 	start, end := chunk.Start+saved, chunk.End-1
@@ -424,6 +427,7 @@ func fetchRange(ctx context.Context, client *http.Client, rawURL string, partial
 	if err != nil {
 		return saved, "", err
 	}
+	req = req.WithContext(context.WithValue(req.Context(), requestSegmentKey{}, part))
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
 	req.Header.Set("If-Range", rep.etag)
 	req.Header.Set("Accept-Encoding", "identity")
@@ -444,7 +448,7 @@ func fetchRange(ctx context.Context, client *http.Client, rawURL string, partial
 		return saved, "", errors.New("range response does not match selected representation")
 	}
 	part.setState(segmentDownloading)
-	writer := &rangeWriter{out: io.NewOffsetWriter(partial, start), count: count, part: part, digest: digest, written: saved, saved: saved, total: chunk.End - chunk.Start, last: time.Now(), report: report}
+	writer := &rangeWriter{out: measuredFileWriter{io.NewOffsetWriter(partial, start), measurementsFrom(ctx)}, count: count, part: part, digest: digest, written: saved, saved: saved, total: chunk.End - chunk.Start, last: time.Now(), report: report}
 	_, err = io.CopyN(writer, response.Body, length)
 	if saveErr := writer.savePrefix(); saveErr != nil {
 		err = errors.Join(err, saveErr)

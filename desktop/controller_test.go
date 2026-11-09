@@ -149,3 +149,92 @@ func TestUnifiedControllerAddsFromFiltersAndCompletesReplacement(t *testing.T) {
 		t.Fatal("Download later created a file")
 	}
 }
+
+func TestManagementApplyAcknowledgmentAndDiskFailureRollback(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	binary := unifiedCLI(t)
+	base := test.NewApp()
+	defer base.Quit()
+	driver := &serialTestDriver{Driver: base.Driver(), events: make(chan func(), 128), stop: make(chan struct{})}
+	go func() {
+		for {
+			select {
+			case fn := <-driver.events:
+				fn()
+			case <-driver.stop:
+				return
+			}
+		}
+	}()
+	defer close(driver.stop)
+	a := serialTestApp{App: base, driver: driver}
+	fyne.SetCurrentApp(a)
+	s, err := loadSpeedSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := unifiedQueue(t, binary, 2)
+	policy := s.requestPolicy()
+	unifiedRequest(t, q, desktopRequest{Operation: "initialize", Management: &policy})
+	var v *downloadsView
+	var w fyne.Window
+	driver.DoFromGoroutine(func() {
+		w = a.NewWindow("settings transaction")
+		v = newDownloadsView(a, w, s, nil, binary)
+		w.SetContent(v.content)
+		v.client = q
+		v.ready = true
+	}, true)
+	defer driver.DoFromGoroutine(func() { w.Close() }, true)
+	next := *s
+	next.ManagementMode = "manual"
+	next.MaxActive = 2
+	done := make(chan error, 1)
+	driver.DoFromGoroutine(func() {
+		v.applySettings(next, func(err error) {
+			if err == nil {
+				*s = next
+			}
+			done <- err
+		})
+	}, true)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("configuration acknowledgment timed out")
+	}
+	loaded, err := loadSpeedSettings()
+	if err != nil || loaded.ManagementMode != "manual" {
+		t.Fatal("acknowledged configuration not persisted")
+	}
+	before := unifiedRequest(t, q, desktopRequest{Operation: "snapshot"})
+	if before.Management.Policy.Mode != "manual" {
+		t.Fatal("saved before scheduler accepted Manual")
+	}
+	badPath := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(badPath, []byte("file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	next.ManagementMode = "automatic"
+	next.path = filepath.Join(badPath, "settings.json")
+	driver.DoFromGoroutine(func() { v.applySettings(next, func(err error) { done <- err }) }, true)
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected settings persistence failure")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("rollback timed out")
+	}
+	after := unifiedRequest(t, q, desktopRequest{Operation: "snapshot"})
+	if after.Management.Policy != before.Management.Policy {
+		t.Fatal("failed settings write left scheduler on a different policy")
+	}
+	loaded, err = loadSpeedSettings()
+	if err != nil || loaded.ManagementMode != "manual" {
+		t.Fatal("failed transaction changed persisted settings")
+	}
+}

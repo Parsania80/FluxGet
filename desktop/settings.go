@@ -16,15 +16,19 @@ import (
 )
 
 type speedSettings struct {
-	Enabled     bool             `json:"enabled"`
-	Default     int64            `json:"default_kib"`
-	Overrides   map[string]int64 `json:"overrides"`
-	MaxActive   int              `json:"max_active,omitempty"`
-	Connections int              `json:"connections,omitempty"`
-	Folder      string           `json:"folder,omitempty"`
-	Overall     int64            `json:"overall_kib,omitempty"`
-	DisplayUnit string           `json:"display_unit,omitempty"`
-	path        string
+	Enabled        bool             `json:"enabled"`
+	Default        int64            `json:"default_kib"`
+	Overrides      map[string]int64 `json:"overrides"`
+	MaxActive      int              `json:"max_active,omitempty"`
+	Connections    int              `json:"connections,omitempty"`
+	Folder         string           `json:"folder,omitempty"`
+	Overall        int64            `json:"overall_kib,omitempty"`
+	DisplayUnit    string           `json:"display_unit,omitempty"`
+	ManagementMode string           `json:"management_mode,omitempty"`
+	TotalRequests  int              `json:"total_requests,omitempty"`
+	OriginRequests int              `json:"origin_requests,omitempty"`
+	applyDownloads func(speedSettings, func(error))
+	path           string
 }
 
 func loadSpeedSettings() (*speedSettings, error) {
@@ -32,7 +36,7 @@ func loadSpeedSettings() (*speedSettings, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &speedSettings{path: filepath.Join(dir, "fluxget", "desktop-speed.json"), Overrides: map[string]int64{}, MaxActive: 5, Connections: 4, DisplayUnit: "MB"}
+	s := &speedSettings{path: filepath.Join(dir, "fluxget", "desktop-speed.json"), Overrides: map[string]int64{}, MaxActive: 5, Connections: 4, DisplayUnit: "MB", ManagementMode: "automatic", TotalRequests: 8, OriginRequests: 4}
 	data, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return s, s.save()
@@ -45,6 +49,12 @@ func loadSpeedSettings() (*speedSettings, error) {
 	}
 	if err := json.Unmarshal(data, s); err != nil {
 		return nil, err
+	}
+	if s.ManagementMode == "" {
+		s.ManagementMode = "automatic"
+	}
+	if (s.ManagementMode != "automatic" && s.ManagementMode != "manual") || s.TotalRequests < 1 || s.TotalRequests > 64 || s.OriginRequests < 1 || s.OriginRequests > 16 {
+		return nil, errors.New("invalid download management settings")
 	}
 	if s.DisplayUnit == "" {
 		s.DisplayUnit = "MB"
@@ -202,7 +212,48 @@ func bindLimitButton(button *widget.Button, settings *speedSettings, key, filena
 	button.OnTapped = func() { edit(key, filename) }
 }
 
+func (s *speedSettings) requestPolicy() requestPolicy {
+	mode := s.ManagementMode
+	if mode == "" {
+		mode = "automatic"
+	}
+	total, origin := s.TotalRequests, s.OriginRequests
+	if total == 0 {
+		total = 8
+	}
+	if origin == 0 {
+		origin = 4
+	}
+	return requestPolicy{Mode: mode, Total: total, PerOrigin: origin}
+}
+func (s *speedSettings) configuration() desktopRequest {
+	policy := s.requestPolicy()
+	return desktopRequest{Operation: "configure", MaxActive: s.MaxActive, Connections: s.Connections, Management: &policy}
+}
+
 func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool) fyne.CanvasObject {
+	policy := s.requestPolicy()
+	mode := widget.NewSelect([]string{"Automatic", "Manual"}, nil)
+	if policy.Mode == "manual" {
+		mode.SetSelected("Manual")
+	} else {
+		mode.SetSelected("Automatic")
+	}
+	total, origin := widget.NewEntry(), widget.NewEntry()
+	total.SetText(fmt.Sprint(policy.Total))
+	origin.SetText(fmt.Sprint(policy.PerOrigin))
+	managementNote := widget.NewLabel("Automatic shares connection slots across your downloads. Customize the limits below if needed. Performance and hardware tuning are not available yet.")
+	managementNote.Wrapping = fyne.TextWrapWord
+	mode.OnChanged = func(value string) {
+		if value == "Automatic" {
+			total.Enable()
+			origin.Enable()
+		} else {
+			total.Disable()
+			origin.Disable()
+		}
+	}
+	mode.OnChanged(mode.Selected)
 	inputUnit := displayUnit(s.DisplayUnit)
 	unit := widget.NewSelect([]string{"KB", "MB", "GB"}, nil)
 	unit.SetSelected(inputUnit)
@@ -240,7 +291,21 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool)
 		}
 		next := *s
 		next.DisplayUnit = unit.Selected
+		next.ManagementMode = "automatic"
+		if mode.Selected == "Manual" {
+			next.ManagementMode = "manual"
+		}
 		var err error
+		next.TotalRequests, err = strconv.Atoi(strings.TrimSpace(total.Text))
+		if err != nil || next.TotalRequests < 1 || next.TotalRequests > 64 {
+			result.SetText("Choose 1–64 total connections.")
+			return
+		}
+		next.OriginRequests, err = strconv.Atoi(strings.TrimSpace(origin.Text))
+		if err != nil || next.OriginRequests < 1 || next.OriginRequests > 16 {
+			result.SetText("Choose 1–16 connections to one server.")
+			return
+		}
 		next.MaxActive, err = strconv.Atoi(strings.TrimSpace(active.Text))
 		if err != nil || next.MaxActive < 1 || next.MaxActive > 64 {
 			result.SetText("Choose 1–64 simultaneous downloads.")
@@ -270,20 +335,28 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool)
 			}
 		}
 		next.Enabled = enabled.Checked
-		if err := next.save(); err != nil {
-			result.SetText("Could not save: " + err.Error())
-			return
+		finish := func(err error) {
+			if err != nil {
+				result.SetText("Could not apply settings: " + err.Error())
+				return
+			}
+			*s = next
+			inputUnit = next.DisplayUnit
+			value.SetText(limitText(next.Default, inputUnit))
+			overall.SetText(limitText(next.Overall, inputUnit))
+			perDownload.Text = "Per download (" + inputUnit + "/s)"
+			allDownloads.Text = "All downloads (" + inputUnit + "/s)"
+			limits.Refresh()
+			result.SetText("Saved. Request budgets and speed limits apply now; connection-count changes apply to the next transfer.")
+			if onSaved != nil {
+				onSaved()
+			}
 		}
-		*s = next
-		inputUnit = next.DisplayUnit
-		value.SetText(limitText(next.Default, inputUnit))
-		overall.SetText(limitText(next.Overall, inputUnit))
-		perDownload.Text = "Per download (" + inputUnit + "/s)"
-		allDownloads.Text = "All downloads (" + inputUnit + "/s)"
-		limits.Refresh()
-		result.SetText("Saved. Scheduling and speed changes apply now; connection changes apply to the next transfer.")
-		if onSaved != nil {
-			onSaved()
+		if s.applyDownloads != nil {
+			result.SetText("Applying settings…")
+			s.applyDownloads(next, finish)
+		} else {
+			finish(next.save())
 		}
 	})
 	save.Importance = widget.HighImportance
@@ -296,7 +369,9 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool)
 	return container.NewVScroll(container.NewPadded(container.NewVBox(
 		widget.NewLabelWithStyle("Display", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), unitNote, widget.NewForm(widget.NewFormItem("Data unit", unit)), widget.NewSeparator(),
 		widget.NewLabelWithStyle("Downloads", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), note,
-		widget.NewForm(widget.NewFormItem("Simultaneous downloads", active), widget.NewFormItem("Connections per download", connections), widget.NewFormItem("Default folder", container.NewBorder(nil, nil, nil, browse, folder))),
+		managementNote,
+		widget.NewAccordion(widget.NewAccordionItem("Customize download management", container.NewVBox(widget.NewForm(widget.NewFormItem("Mode", mode), widget.NewFormItem("Maximum simultaneous downloads", active), widget.NewFormItem("Maximum connections per download", connections), widget.NewFormItem("Maximum total connections", total), widget.NewFormItem("Maximum connections to one server", origin))))),
+		widget.NewForm(widget.NewFormItem("Default folder", container.NewBorder(nil, nil, nil, browse, folder))),
 		widget.NewSeparator(), widget.NewLabelWithStyle("Speed limits", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), speedNote, enabled,
 		limits, save, result,
 	)))

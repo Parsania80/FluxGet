@@ -105,6 +105,13 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 		}
 		scanDone <- s.Err()
 	}()
+	budget := newRequestBudget(requestPolicy{Mode: "manual", Total: 8, PerOrigin: 4})
+	measurements := make(map[int]*transferMeasurements)
+	samplers := make(map[int]*observationSampler)
+	observations := make(map[int]transferObservation)
+	generation := uint64(1)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 	done := make(chan queueResult, maxActive)
 	updates := make(chan queueProgress, maxActive*2)
 	names := make(chan queueNameRequest)
@@ -174,7 +181,15 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 					break
 				}
 				job := q.Jobs[i]
+				generation++
 				workerCtx, cancel := context.WithCancel(ctx)
+				m := &transferMeasurements{}
+				measurements[job.ID] = m
+				samplers[job.ID] = &observationSampler{}
+				samplers[job.ID].sample(time.Now(), m.snapshot(), generation)
+				delete(observations, job.ID)
+				workerCtx = context.WithValue(workerCtx, measurementContextKey{}, m)
+				workerCtx = context.WithValue(workerCtx, budgetContextKey{}, budget)
 				active[job.ID] = cancel
 				writer := &queueProgressWriter{id: job.ID, updates: updates}
 				progressWriters[job.ID] = writer
@@ -197,6 +212,12 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 			return stopErr
 		}
 		select {
+		case now := <-ticker.C:
+			for id := range active {
+				if observation, ok := samplers[id].sample(now, measurements[id].snapshot(), generation); ok {
+					observations[id] = observation
+				}
+			}
 		case <-ctxDone:
 			shutdown(nil)
 		case err := <-inputDone:
@@ -228,6 +249,7 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 			}
 			request.done <- nameErr
 		case result := <-done:
+			generation++
 			if writer := progressWriters[result.id]; writer != nil {
 				if snapshot := writer.segments.Load(); snapshot != nil {
 					layouts[result.id] = *snapshot
@@ -308,7 +330,16 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 					case "initialize":
 						if len(active) != 0 {
 							requestErr = errors.New("cannot initialize a desktop session while downloads are active")
-						} else if !desktopInitialized {
+							break
+						}
+						if req.Management != nil {
+							requestErr = budget.configure(*req.Management)
+							if requestErr != nil {
+								break
+							}
+							generation++
+						}
+						if !desktopInitialized {
 							for i := range q.Jobs {
 								if q.Jobs[i].State == "queued" {
 									q.Jobs[i].State = "paused"
@@ -323,7 +354,13 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 						if req.MaxActive < 1 || req.MaxActive > 64 || req.Connections < 1 || req.Connections > 16 {
 							requestErr = errors.New("simultaneous downloads must be 1–64 and connections 1–16")
 						} else {
-							maxActive, connections = req.MaxActive, req.Connections
+							if req.Management != nil {
+								requestErr = budget.configure(*req.Management)
+							}
+							if requestErr == nil {
+								maxActive, connections = req.MaxActive, req.Connections
+								generation++
+							}
 						}
 					case "add", "adopt":
 						response.JobID, requestErr = desktopAdd(&q, req.Job, req.Operation == "adopt")
@@ -372,6 +409,29 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 					response.Error = requestErr.Error()
 				}
 				response.Jobs = desktopEntries(q.Jobs, speeds, liveSegmentLayouts(layouts, progressWriters), time.Now())
+				management, jobRequests := budget.snapshot()
+				response.Management = &management
+				for i := range response.Jobs {
+					entry := &response.Jobs[i]
+					if m := measurements[entry.ID]; m != nil {
+						snapshot := m.snapshot()
+						entry.Measurements = &snapshot
+					}
+					if observation, ok := observations[entry.ID]; ok && observation.Generation == generation {
+						entry.Observation = &observation
+					}
+					requestState := jobRequests[entry.ID]
+					entry.Requests = &requestState
+				}
+				// Remove transient measurements for entries removed from history.
+				for id := range measurements {
+					if find(id) < 0 {
+						delete(measurements, id)
+						delete(samplers, id)
+						delete(observations, id)
+					}
+				}
+
 				data, _ := json.Marshal(response)
 				fmt.Fprintf(output, "DESKTOP_JSON %s\n", data)
 			case "help":
@@ -573,6 +633,9 @@ func runQueueDownload(ctx context.Context, j queueJob, connections int) error {
 
 func runQueueDownloadWithProgress(ctx context.Context, j queueJob, connections int, progress io.Writer) error {
 	client := defaultDownloadClient()
+	if budget, ok := ctx.Value(budgetContextKey{}).(*requestBudget); ok {
+		client.Transport = &requestTransport{base: client.Transport, budget: budget, job: j.ID, metrics: measurementsFrom(ctx)}
+	}
 	if limiter, ok := ctx.Value(limiterContextKey{}).(*speedLimiter); ok {
 		limitClient(client, limiter)
 	}

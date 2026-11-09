@@ -79,6 +79,30 @@ func TestUnitChangesPreserveStoredLimitsExactly(t *testing.T) {
 	}
 }
 
+func TestCommonLimitValuesReopenWithoutStorageDecimals(t *testing.T) {
+	for _, tc := range []struct{ text, unit string }{
+		{"1", "MB"}, {"0.5", "MB"}, {"0.1", "MB"}, {"1.5", "MB"}, {"2.25", "MB"},
+		{"10", "MB"}, {"100", "MB"}, {"128", "KB"}, {"512", "KB"}, {"1", "GB"},
+	} {
+		t.Run(tc.text+tc.unit, func(t *testing.T) {
+			stored, err := parseDisplayLimit(tc.text, tc.unit, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range 3 {
+				text := limitText(stored, tc.unit)
+				if text != tc.text {
+					t.Fatalf("entered %s, reopened as %s", tc.text, text)
+				}
+				next, err := parseDisplayLimit(text, tc.unit, false)
+				if err != nil || next != stored {
+					t.Fatalf("reopening changed the engine limit: %d to %d: %v", stored, next, err)
+				}
+			}
+		})
+	}
+}
+
 func TestSettingsUnitSelectorPersistsWithoutChangingLimits(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	a := test.NewApp()

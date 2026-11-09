@@ -97,19 +97,21 @@ func startConfiguredQueue(executable string, maxActive, connections int, speedLi
 }
 
 type desktopRequest struct {
-	ID          int        `json:"id"`
-	Operation   string     `json:"operation"`
-	Job         queueEntry `json:"job"`
-	MaxActive   int        `json:"max_active"`
-	Connections int        `json:"connections"`
+	ID          int            `json:"id"`
+	Operation   string         `json:"operation"`
+	Job         queueEntry     `json:"job"`
+	MaxActive   int            `json:"max_active"`
+	Connections int            `json:"connections"`
+	Management  *requestPolicy `json:"management,omitempty"`
 }
 
 type desktopResponse struct {
-	Revision uint64       `json:"revision"`
-	ID       int          `json:"id"`
-	JobID    int          `json:"job_id"`
-	Jobs     []queueEntry `json:"jobs"`
-	Error    string       `json:"error"`
+	Revision   uint64          `json:"revision"`
+	ID         int             `json:"id"`
+	JobID      int             `json:"job_id"`
+	Jobs       []queueEntry    `json:"jobs"`
+	Error      string          `json:"error"`
+	Management *budgetSnapshot `json:"management,omitempty"`
 }
 
 func (q *queueClient) request(ctx context.Context, request desktopRequest) (desktopResponse, error) {
@@ -157,4 +159,26 @@ func (q *queueClient) send(command string) error {
 	default:
 		return errors.New("queue is busy")
 	}
+}
+
+// Policy is sent explicitly to the scheduler; live speed polling never owns it.
+type requestPolicy struct {
+	Mode      string `json:"mode"`
+	Total     int    `json:"total"`
+	PerOrigin int    `json:"per_origin"`
+}
+type budgetSnapshot struct {
+	Policy  requestPolicy `json:"policy"`
+	Active  int           `json:"active"`
+	Waiting int           `json:"waiting"`
+}
+type jobBudgetSnapshot struct {
+	Active  int `json:"active"`
+	Waiting int `json:"waiting"`
+}
+type measurementSnapshot struct {
+	Accepted    int64 `json:"accepted_bytes"`
+	Requests    int64 `json:"requests"`
+	LimiterWait int64 `json:"limiter_wait_ns"`
+	BudgetWait  int64 `json:"budget_wait_ns"`
 }

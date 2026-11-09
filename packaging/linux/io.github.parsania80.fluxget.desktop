@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=FluxGet
+Comment=Download files with parallel connections and safe resume
+Exec=fluxget-gui
+Icon=io.github.parsania80.fluxget
+Terminal=false
+StartupNotify=true
+StartupWMClass=FluxGet
+Categories=Network;FileTransfer;
+Keywords=download;transfer;manager;

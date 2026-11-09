@@ -30,9 +30,11 @@ func (t fluxTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) co
 }
 
 func main() {
-	a := app.NewWithID("io.github.parsania80.fluxget")
+	a := app.NewWithID(applicationID)
+	a.SetIcon(appIcon)
 	a.Settings().SetTheme(fluxTheme{theme.DefaultTheme()})
 	w := a.NewWindow("FluxGet")
+	w.SetIcon(appIcon)
 	w.Resize(fyne.NewSize(1100, 720))
 	lock, err := lockHistory()
 	if err != nil {
@@ -93,6 +95,7 @@ type downloadsView struct {
 	partKey                                                  string
 	partDetails                                              *fyne.Container
 	status, summary                                          *widget.Label
+	management                                               *budgetSnapshot
 	empty                                                    fyne.CanvasObject
 	add, pause, resume, retry, open, folder, more, reconnect *widget.Button
 }
@@ -153,7 +156,11 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 			button.Enable()
 			remove.Enable()
 		}
-		box.Objects[1].(*widget.Label).SetText(downloadState(j.State) + "  ·  " + downloadDetails(j, v.settings.DisplayUnit))
+		details := downloadState(j.State) + "  ·  " + downloadDetails(j, v.settings.DisplayUnit)
+		if j.State == "running" && j.Requests != nil && j.Requests.Active == 0 && j.Requests.Waiting > 0 {
+			details = "Waiting for a connection slot  ·  " + downloadDetails(j, v.settings.DisplayUnit)
+		}
+		box.Objects[1].(*widget.Label).SetText(details)
 		value, known := progressValue(j.Progress)
 		if !known && j.SavedProgress != nil {
 			value, known = *j.SavedProgress, true
@@ -202,7 +209,8 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 	toolbar := container.NewHBox(v.add, v.pause, v.resume, v.retry, v.open, v.folder, v.more)
 	top := container.NewPadded(container.NewVBox(title, v.summary, toolbar, widget.NewSeparator()))
 	downloads := container.NewBorder(top, nil, nil, nil, split)
-	settingsPage := settings.page(w, func() { v.configure() }, func() bool { return v.ready && !v.busy && !v.closing })
+	settings.applyDownloads = v.applySettings
+	settingsPage := settings.page(w, func() { v.refresh() }, func() bool { return v.ready && !v.busy && !v.closing })
 	tabs := container.NewAppTabs(container.NewTabItemWithIcon("Downloads", theme.DownloadIcon(), downloads), container.NewTabItemWithIcon("Settings", theme.SettingsIcon(), settingsPage))
 	v.content = container.NewBorder(nil, container.NewPadded(container.NewBorder(nil, nil, nil, v.reconnect, v.status)), nil, nil, tabs)
 	categories.SetSelected("All downloads")
@@ -291,7 +299,7 @@ func (v *downloadsView) refresh() {
 	v.restoring = false
 	running, waiting, paused := 0, 0, 0
 	for _, row := range downloadRows(v.entries, v.history, "All downloads") {
-		switch downloadState(row.Entry.State) {
+		switch row.Entry.displayState() {
 		case "Downloading":
 			running++
 		case "Waiting":
@@ -300,7 +308,11 @@ func (v *downloadsView) refresh() {
 			paused++
 		}
 	}
-	v.summary.SetText(fmt.Sprintf("%d downloading  ·  %d waiting  ·  %d paused  ·  up to %d at once", running, waiting, paused, v.settings.MaxActive))
+	summary := fmt.Sprintf("%d downloading  ·  %d waiting  ·  %d paused  ·  up to %d at once", running, waiting, paused, v.settings.MaxActive)
+	if v.management != nil {
+		summary = map[string]string{"automatic": "Automatic", "manual": "Manual"}[v.management.Policy.Mode] + "  ·  " + summary
+	}
+	v.summary.SetText(summary)
 	v.actions()
 }
 func (v *downloadsView) apply(entries []queueEntry) {
@@ -334,6 +346,7 @@ func (v *downloadsView) accept(response desktopResponse) {
 		return
 	}
 	v.revision = response.Revision
+	v.management = response.Management
 	v.apply(response.Jobs)
 }
 
@@ -469,9 +482,9 @@ func callDesktop(q *queueClient, request desktopRequest) (desktopResponse, error
 	return q.request(ctx, request)
 }
 func (v *downloadsView) configure() {
-	active, connections := v.settings.MaxActive, v.settings.Connections
+	configuration := v.settings.configuration()
 	v.work(func(q *queueClient) (desktopResponse, error) {
-		return callDesktop(q, desktopRequest{Operation: "configure", MaxActive: active, Connections: connections})
+		return callDesktop(q, configuration)
 	}, nil)
 }
 func (v *downloadsView) command(action string) {
@@ -844,6 +857,48 @@ func (v *downloadsView) finishReplacement(index int, entry queueEntry) {
 			v.refresh()
 			if v.closing {
 				v.stopService()
+			}
+		})
+	}()
+}
+
+// Apply scheduler configuration before reporting success. Persist only after
+// acknowledgment, and restore the prior server policy if writing settings fails.
+func (v *downloadsView) applySettings(next speedSettings, done func(error)) {
+	if !v.ready || v.busy || v.closing || v.client == nil {
+		done(fmt.Errorf("wait for downloads to finish loading"))
+		return
+	}
+	q := v.client
+	old := *v.settings
+	next.Overrides = make(map[string]int64, len(v.settings.Overrides))
+	for key, value := range v.settings.Overrides {
+		next.Overrides[key] = value
+	}
+	v.busy = true
+	v.refresh()
+	go func() {
+		response, err := callDesktop(q, next.configuration())
+		if err == nil {
+			if saveErr := next.save(); saveErr != nil {
+				_, rollbackErr := callDesktop(q, old.configuration())
+				err = fmt.Errorf("save: %w", saveErr)
+				if rollbackErr != nil {
+					err = fmt.Errorf("%v; restoring previous scheduler settings failed: %v", err, rollbackErr)
+				}
+			}
+		}
+		fyne.Do(func() {
+			if v.client != q {
+				done(fmt.Errorf("downloads service disconnected while saving settings"))
+				return
+			}
+			v.busy = false
+			done(err)
+			if err == nil {
+				v.accept(response)
+			} else {
+				v.refresh()
 			}
 		})
 	}()

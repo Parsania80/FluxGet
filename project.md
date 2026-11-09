@@ -515,6 +515,96 @@ The operator selected a Go desktop app using Fyne on 2026-11-05. The current pro
 
 **Done when:** One list and one scheduler manage desktop jobs, normal use has no manual queue setup, and migration plus interactive acceptance pass.
 
+### Automatic mode design (2026-11-09; stage 1 implemented)
+
+**Stage 1 implementation:** `request_budget.go` is the queue-owned, mutex-protected global/origin lease broker; `measurements.go` provides atomic transfer counters and bounded 10-second observations; `adaptive.go` is a pure policy exercised only by fake-clock simulations. The transport acquires capacity separately for every redirect hop and releases it on body completion, close, error, or cancellation. Measurements separate accepted file bytes, raw response bytes (including probes), request/header/network waits, intentional limiter waits, file writes, data sync, checkpoint work, local verification, and retry waits. Runtime counters reset on each transfer session and are excluded from queue/checkpoint JSON. Durations sum across workers and can exceed wall time; local verification includes saved-prefix and final-file reads, not a CPU profiler of streaming hashes. Configuration/job-set changes invalidate comparison baselines; retries/errors and interrupted sampling invalidate affected windows.
+
+**Operator default preference:** On 2026-11-09 the operator selected Automatic as the default, with optional customization. Stage 1 exposes automatic shared budgets now, with 8 total and 4 per origin by default; it does not yet apply the simulated throughput policy or resize workers/hardware targets. Existing settings without a mode migrate to Automatic while retaining file, worker, speed, and folder values. An explicit Manual selection is preserved. Customize download management is collapsed by default. Settings report success only after scheduler acknowledgment and persisted settings; a settings-write failure restores the prior scheduler policy. Standalone CLI sessions remain Manual unless configured through the desktop protocol.
+
+**Goal:** Choose useful file and range-worker concurrency from observed results while keeping user ceilings, speed limits, server restrictions, and verified recovery authoritative. Automatic mode does not promise maximum internet speed or uninterrupted browsing. These are application control rules, not a replacement for the transport's congestion control. The numerical thresholds below are initial hypotheses to validate in benchmarks, not measured optimal settings.
+
+#### Approach comparison
+
+| Option | Advantages | Costs / limits | Selected direction |
+| --- | --- | --- | --- |
+| Manual settings only | Predictable and already implemented | Requires users to tune two limits | Retain as Manual mode |
+| Choose counts from CPU cores, RAM, or advertised link speed | Simple startup heuristic | Cannot establish server performance, shared bandwidth, disk pressure, or current contention | Do not use as the main controller |
+| Measure real downloads and adjust within ceilings | Responds to changing conditions and reports why it changes | Needs instrumentation, controlled experiments, and recovery tests | Selected; default Automatic per operator request |
+
+#### User controls and visible behavior
+
+- Default to **Automatic** for new settings and existing settings without an explicit mode. Put **Mode: Automatic / Manual** and the concurrency controls under collapsed **Customize download management**. An explicit Manual choice persists. Changing mode never starts a user-paused or Download later job. Stage 1 explains that performance and hardware tuning are not available yet.
+- Keep **Simultaneous downloads** and **Connections per download**. In Automatic, label them **Maximum simultaneous downloads** and **Maximum connections per download**, with help text: "FluxGet may use fewer when extra workers do not help." Retain the existing user's values; proposed fresh-install ceilings remain five files and four workers per file.
+- Put **Maximum total connections** (initial 8) and **Maximum connections to one server** (initial 4) under Advanced. These count in-flight HTTP requests, including metadata probes and retries; they do not claim to count TCP sockets. Keep application hard bounds: 1–64 files, 1–16 workers per file, 1–64 total requests, 1–16 requests per server. The smallest applicable ceiling wins. A total budget smaller than the file maximum is valid: some files wait. These new global/origin budgets apply in Automatic; Manual keeps the current file/worker settings. On a mode change, already issued leases remain tracked until returned, and the owner installs the new policy atomically before granting new work.
+- "Server" means a normalized origin (scheme, lowercase hostname, effective port), not a full URL. Separate hostnames can still share infrastructure; do not promise an aggregate limit across a CDN. Redirect hops release/reacquire grants for their destination origin before dispatch. The HTTP transport continues to enforce protocol-level stream limits.
+- Example summary: **Automatic · 2 downloading · 3 waiting**. Example row: **4 parts · 2 active · up to 4 connections**, with **Why?** details such as "Extra connections did not improve speed," "Your speed limit is reached," "Waiting for a server slot," or "Reducing work while storage catches up." Keep observed states distinct from configured maximums.
+- Use clear **Learning**, **Stable**, **Backing off**, and **Limited by your settings** status messages. Do not display unavailable measurements as healthy or label a server-delay estimate as actual network RTT.
+- Speed settings retain their current meaning. A custom speed ceiling can be removed with Remove limit; default and shared overall ceilings continue to apply. Automatic never increases or disables a speed ceiling.
+- A reduced maximum prevents new grants immediately. Existing over-limit work is marked **Reducing active connections…** until extra workers stop safely; counts cannot fall instantaneously. Returning to Manual restores configured concurrency within the same drain rules, rather than restarting downloads. No surprise file deletion, restart, or final publication.
+
+#### Ownership, budgets, and persistence
+
+The queue owner remains the only global scheduling authority. It owns immutable observations, desired budgets, per-origin cooldowns, and a bounded lease broker. Each transfer owner owns its part/checkpoint state and applies its desired worker count; workers never edit the queue or checkpoint JSON directly.
+
+```text
+Settings ceilings + transfer/resource observations
+    -> queue owner + adaptive controller
+    -> global/origin request leases + per-file worker targets
+    -> transfer owners -> validated ranges -> prefix checkpoints
+    -> structured snapshots -> Downloads UI
+```
+
+- A pure policy component takes a timestamped observation and returns a bounded decision plus reason. It performs no network, filesystem, or UI calls. Implemented files are `adaptive.go` (simulated policy), `request_budget.go` (leases), and `measurements.go` (runtime counters and observations); resource adapters remain planned. Tests use a fake clock. Go standard library and the pinned Fyne stack remain sufficient.
+- Request admission grants global and origin capacity atomically. Never hold a global token while waiting for an origin token, and never hold any request token during retry backoff. Bounded queues, cancellation, EOF/error, redirects, and shutdown must all return leases exactly once. The queue event loop must remain responsive while workers wait.
+- Keep per-file transfer sessions bounded by the user file ceiling. A file counts as Downloading only when it has active transfer work; internal initialization, waiting for capacity, verification, and server cooldown must have honest reason/state snapshots. Do not instantiate an unbounded parked transfer for every queued file.
+- Give admitted files one useful request opportunity before granting extra workers to another file, using round-robin grants. Queue admission uses FIFO among currently eligible origins; an origin cooldown must not block unrelated origins. Waiting files can still wait for an active file to finish when file slots are full. Initial scope does not promise bounded wait times for huge files or periodically pause files solely for rotation.
+- Persist the mode and user ceilings as optional fields in desktop settings and in explicit structured scheduler configuration. Missing mode/budget fields use Automatic with total 8 and per-origin 4; explicitly invalid values are rejected. Keep learned speeds, transient cooldowns, grants, and reason snapshots runtime-only; no URL-based performance history or hardware fingerprint is stored. Do not add speculative fields to queue records or change queue schema 2 solely for Automatic.
+- The scheduler must acknowledge effective configuration before the UI reports it applied. On failure, retain its last accepted policy and show the error. Auto/Manual changes use one coherent settings transaction; speed-file polling must not create a second adaptive owner. Standalone CLI remains Manual initially; later Auto CLI support must reuse this controller and budgets.
+
+#### Measurements and decision rules
+
+Start with one eligible file and one worker. Sample existing download traffic once per second. Build 10-second windows of fresh accepted body bytes; saved bytes do not count as newly transferred. Attribute time separately to network reads, intentional rate-limiter waits, file writes, synchronization/checkpointing, validation, and retry delays. Windows spanning a job completion, settings change, reconnect, or worker retirement are not valid before/after performance comparisons.
+
+1. **Observe before growing:** Require two usable windows with no current pressure or cooldown. Use total throughput and the affected file/origin throughput, not a single fast request. Freeze upward experiments when bytes/time observations are missing or unstable. Near-complete files and sequential-only responses are not candidates for extra range workers.
+2. **Change one variable:** Run one performance experiment at a time across the queue: either add one worker to an admitted file or admit one additional eligible file. Skip worker trials if less than about 16 MiB remains for that file. Limits, checkpoint correctness, and normal user actions take precedence over an experiment.
+3. **Compare:** After settling for five seconds, compare two 10-second windows against the prior baseline. Provisionally keep a worker increase only if median aggregate throughput improves by at least 10%, without a sustained latency/pressure regression. Otherwise restore the earlier target and wait at least 30 seconds before another upward trial. Sudden external changes invalidate the comparison instead of claiming causation. Re-test conservatively after a minute of stable conditions so the controller can discover changed bandwidth.
+4. **File admission differs from worker trials:** Try another eligible file if queued work exists and there is budget headroom, especially when current files hit their individual speed ceilings or a different origin may help. A started file is not canceled just because the throughput trial was inconclusive. Lower the desired admission target, stop adding files, and let excess active files complete. This avoids repeated file restarts; stronger file preemption requires a separate acceptance gate. Show that a target is draining rather than claiming it is already enforced.
+5. **Recognize intentional limits:** When throughput is within about 5% of an applicable speed ceiling and limiter waits confirm it, do not add workers to defeat that ceiling. A file ceiling does not forbid starting another file if the shared ceiling and all budgets allow it. Never infer the internet link's maximum speed solely from current download throughput.
+6. **Back off selectively:** On 429 or transient 503 responses, reduce the affected origin's target (halve it, minimum one) and stop new requests to that origin during the retry cooldown. Reuse the existing retry bounds and Retry-After parsing; a delay beyond the current one-minute automatic retry allowance stops automatic retry and requires user action. Other jobs to that origin must not bypass its cooldown; unrelated origins can continue. Repeated timeouts reduce the affected file/origin target; they are not automatically proof of global congestion. Invalid range/validator responses trigger the existing correctness failure path, not an adaptive retry that silently accepts different content.
+7. **Pressure overrides growth:** Persistent CPU, memory, or storage pressure stops new grants and reduces desired workers gradually. Do not classify high write latency alone as proof of a slow disk: include sync cost, queueing, quota limits, and measurement availability. ENOSPC or failed checkpoint publication is a storage error; preserve the prior valid checkpoint and report failure rather than tuning around it.
+8. **Network changes:** If downloads lose connectivity or observations shift sharply, abort experiments and discard throughput baselines. Start conservatively after connectivity returns; respect retry and origin cooldowns. Restarts restore jobs paused and discard all learned targets.
+
+#### Hardware and network guardrails
+
+First deliver reliable throughput, request/error, limiter-wait, write, and sync observations. Automatic stages 1–3 use these measurements; CPU/quota and OS memory-pressure reactions become available in stage 4 and must not be advertised as implemented earlier. Add Linux resource observations through small adapters after the deterministic policy and live-resize foundation pass; unsupported platforms return Unknown and keep the conservative request budget, rather than inventing CPU/memory readings or increasing above it.
+
+- Evaluate CPU pressure using sustained utilization relative to the process's available CPU quota, not the raw core count. Initial test thresholds: above 85% for 10 seconds blocks growth; below 70% for 30 seconds permits reconsideration. They are tunable hypotheses and must work in cgroups as well as a normal desktop.
+- Keep streaming buffers bounded. Initial resource limits: at most 128 MiB of transfer read/write buffers across the app and 32 MiB of explicitly allocated hashing buffers; the grant broker accounts for them before launching a worker. This is not a total-process RSS guarantee, since Fyne, Go, and HTTP transports also allocate memory. Add OS low-memory pressure and process memory observations separately; do not read the whole file into RAM for hashing.
+- Track the destination filesystem and checkpoint filesystem separately. Proposed storage guardrail: p95 write/sync duration over 500 ms in two windows blocks growth; a value over twice that filesystem's stable baseline also triggers observation, not an unqualified device diagnosis. Reduce one worker, measure again, and keep the reduction only when pressure improves. Benchmark HDD, SSD, slow checkpoint storage, and constrained filesystems.
+- Response-header delay from real download requests can detect a regression relative to the same origin's baseline, but is not network RTT and cannot measure another app's responsiveness. Use it only as a supporting signal, alongside throughput and errors. Do not generate external speed-test traffic, ping third-party hosts, or inspect other apps' browsing. A dedicated "keep browsing responsive" promise would require its own measurable design and acceptance.
+
+#### Dynamic workers and saved parts
+
+- Separate **saved file parts** from **currently active workers**. Preserve the version-four checkpoint's existing coverage, prefix lengths, and hashes. New Automatic transfers choose fixed boundaries up to the configured per-file maximum (no more than 16, with at least roughly 256 KiB per part); start only one worker, leaving other parts Waiting. Small/unsupported responses use one sequential worker.
+- An existing four-part checkpoint remains four parts. Raising the maximum to eight does not invent four new saved ranges. Effective worker count is also bounded by remaining eligible parts; show "Limited by saved part layout" when relevant. Live splitting/work stealing is explicitly deferred; it needs a separate recovery-format design.
+- To lower a worker target, the transfer owner requests retirement of selected workers, stops their HTTP work, waits for their writes to finish, and publishes their final valid prefixes before releasing their part ownership. Siblings keep working. Retirement is an internal scheduling outcome, not a job failure, whole-job pause, or retry-budget charge. Never assign a suffix to a replacement worker while the prior writer can still write there.
+- Increasing a target starts an unowned waiting suffix at `part.Start + savedLength`, subject to fresh request validation and atomic global/origin admission. Hash the saved prefix before reuse; compare it to the recorded digest and verify the strong ETag/remote representation. Retain the existing fully validated EOF rule before marking a part Complete.
+- A sequential response without safe prefix/range recovery is not repeatedly canceled for tuning. Let it drain when targets shrink; explicit user pause/cancel and real failures retain existing semantics. A checkpoint-save error stops the affected transfer safely; the controller must not report retired bytes as saved or continue spawning replacements.
+
+#### Delivery stages and acceptance gates
+
+| Stage | Deliverable | Evidence required |
+| --- | --- | --- |
+| 1 | ✅ Implemented: structured measurements, Manual regression baseline, pure policy simulation, atomic global/origin broker, default Automatic controls | Race-tested fake-clock policy, bounded/cancelable grants, fair admission, redirect and HTTP/2 accounting, real multi-download budgets/restart, runtime-only metrics, settings migration and acknowledgment/rollback; throughput policy is simulated only |
+| 2 | Resize workers within existing saved part boundaries | Real local HTTP tests change 1→2→4→1 during a transfer, assert actual remaining offsets and concurrency, repeated retire/resume, race detector, byte-identical output |
+| 3 | Adaptive decisions and file admission; extend the default Automatic UI | Settings migration/acknowledgment, honest status reasons, Manual restoration, per-file/overall limits, same-origin versus multiple-origin fairness, failed trials and draining behavior |
+| 4 | Linux hardware observations and tuning | Measured resource-bound tests, missing-metric behavior, cgroup quotas/low-memory pressure, slow destination/checkpoint filesystems, documented thresholds and limitations |
+| 5 | Full adaptive acceptance for the default Automatic experience | Replayable synthetic and native trials compare Manual and Automatic on throughput, request counts, variability, CPU/memory/storage cost, and recovery; operator review passes |
+
+Required scenarios include one fast stream that gains nothing from more workers; a server that benefits from several ranges; changing bandwidth; user speed ceilings; one throttled origin beside a healthy origin; 429/503 and Retry-After (including the over-one-minute stop rule); redirects crossing origin budgets; unknown-length sequential responses; HTTP/2 request multiplexing; FIFO/grant fairness; simultaneous settings changes; and a worker retired during a checkpoint failure. Kill/reopen at retirement and checkpoint publication boundaries and verify there are no duplicate writers, missing bytes, falsely complete ranges, stale leases, or silently resumed paused jobs.
+
+**Protocol references:** Range validation remains governed by [HTTP range responses](https://www.rfc-editor.org/rfc/rfc9110.html#section-15.3.7). A 429 response can include Retry-After as described in [RFC 6585](https://www.rfc-editor.org/rfc/rfc6585.html#section-4). HTTP/2 stream limits apply independently of app request budgets; see [RFC 9113](https://www.rfc-editor.org/rfc/rfc9113.html#section-5.1.2). Controller thresholds and resource budgets above are FluxGet design proposals, not values prescribed by these standards.
+
 ### Browser integration milestone - Chrome, Firefox, and Opera
 
 **Goal:** When capture is enabled, clicking a supported download in a selected browser brings it into FluxGet's unified Downloads experience. Users can turn the feature off globally or for individual browsers. This is a separate product milestone after the unified desktop foundation, starting on Linux/amd64.
@@ -606,16 +696,17 @@ The following priority order reflects the operator's 2026-11-09 feedback. Browse
 | --- | --- | --- | --- |
 | 1 | CLI and desktop prototype baseline | ✅ Done | Commit 12635b4 installed locally; recorded automated checks cover the prototype, not full release acceptance |
 | 2 | Simplify Downloads and queue interaction | 🔄 Current | Implementation, automated coverage, and local preview installation complete; operator interactive acceptance remains |
-| 3 | Browser capability spike and native-bridge contract | ⬜ Todo | Next; check Chrome, Firefox, and Opera capabilities and package constraints |
-| 4 | Shared intake, native host, and manual Send to FluxGet | ⬜ Todo | Versioned protocol, one owner, idempotent pending requests, extension connection tests |
-| 5 | Chrome automatic capture and integration settings | ⬜ Todo | Master/per-browser controls, safe handoff, supported public downloads, fallback |
-| 6 | Firefox and Opera rollout | ⬜ Todo | Browser-specific manifests/registration; native package testing and compatibility matrix |
-| 7 | Browser integration packaging and acceptance | ⬜ Todo | Store distribution, stable IDs, repair/uninstall, crash tests, privacy and permission review |
-| 8 | Remaining v0.1 engine release checks | ⬜ Todo | Continue alongside desktop work: resource bounds, release environment, evidence review, final artifacts |
-| 9 | Multi-interface experiment | ⬜ Todo | Later; keep platform and routing evidence requirements from Phase 8 |
-| 10 | Authenticated browser downloads | ⬜ Todo | Separate credential and request-replay design; unsupported in the initial integration |
+| 3 | Automatic download management | 🔄 Current | Stage 1 implemented: measurements and request budgets, Automatic by default with optional customization; next is safe live worker resizing |
+| 4 | Browser capability spike and native-bridge contract | ⬜ Todo | After the selected Automatic foundations; check Chrome, Firefox, and Opera capabilities and package constraints |
+| 5 | Shared intake, native host, and manual Send to FluxGet | ⬜ Todo | Versioned protocol, one owner, idempotent pending requests, extension connection tests |
+| 6 | Chrome automatic capture and integration settings | ⬜ Todo | Master/per-browser controls, safe handoff, supported public downloads, fallback |
+| 7 | Firefox and Opera rollout | ⬜ Todo | Browser-specific manifests/registration; native package testing and compatibility matrix |
+| 8 | Browser integration packaging and acceptance | ⬜ Todo | Store distribution, stable IDs, repair/uninstall, crash tests, privacy and permission review |
+| 9 | Remaining v0.1 engine release checks | ⬜ Todo | Continue alongside desktop work: resource bounds, release environment, evidence review, final artifacts |
+| 10 | Multi-interface experiment | ⬜ Todo | Later; keep platform and routing evidence requirements from Phase 8 |
+| 11 | Authenticated browser downloads | ⬜ Todo | Separate credential and request-replay design; unsupported in the initial integration |
 
 ### ➡️ Current: #2 - Simplify Downloads and queue interaction
-### ⏭️ Next: #3 - Browser capability spike and native-bridge contract
+### ⏭️ Next: #3 stage 2 - Safe live worker resizing
 
-**Next concrete action:** Interactively review the unified Downloads preview: add several files, check Waiting and Download later, pause/resume, inspect Settings, and verify completed-file actions. Resolve any usability issues before beginning the browser capability spike. Browser extensions and a native host remain unimplemented.
+**Next concrete action:** Interactively review the unified Downloads preview: add several files, check Waiting and Download later, pause/resume, inspect Settings, and verify completed-file actions. Resolve any remaining usability issues, then implement Automatic stage 2: safe live worker resizing within existing saved part boundaries. Stage 1 measurements and request budgets are implemented; throughput-driven tuning, hardware feedback, browser extensions, and a native host remain unimplemented.

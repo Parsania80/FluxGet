@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // Chunk boundaries are half-open: Start is included and End is excluded.
@@ -120,6 +121,13 @@ func saveCheckpoint(path string, partial *os.File, c checkpoint) error {
 }
 
 func saveCheckpointWithHook(path string, partial *os.File, c checkpoint, hook func(string)) error {
+	return saveCheckpointMeasured(path, partial, c, hook, nil)
+}
+
+func saveCheckpointMeasured(path string, partial *os.File, c checkpoint, hook func(string), metrics *transferMeasurements) error {
+	started := time.Now()
+	var syncTime time.Duration
+	defer func() { metrics.addDuration(metricCheckpoint, time.Since(started)-syncTime) }()
 	if err := c.validate(); err != nil {
 		return err
 	}
@@ -167,8 +175,12 @@ func saveCheckpointWithHook(path string, partial *os.File, c checkpoint, hook fu
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("inspect checkpoint path: %w", err)
 	}
-	if err := partial.Sync(); err != nil {
-		return fmt.Errorf("sync partial file: %w", err)
+	syncStarted := time.Now()
+	syncErr := partial.Sync()
+	syncTime = time.Since(syncStarted)
+	metrics.addDuration(metricSync, syncTime)
+	if syncErr != nil {
+		return fmt.Errorf("sync partial file: %w", syncErr)
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".fluxget-checkpoint-*")
 	if err != nil {

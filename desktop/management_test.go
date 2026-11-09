@@ -1,0 +1,167 @@
+package main
+
+import (
+	"encoding/json"
+	"image/png"
+	"os"
+	"testing"
+
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/widget"
+)
+
+func TestManagementDefaultsAutomaticAndPreservesExplicitManual(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	s, err := loadSpeedSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.requestPolicy() != (requestPolicy{Mode: "automatic", Total: 8, PerOrigin: 4}) {
+		t.Fatalf("wrong default: %+v", s)
+	}
+	if err := os.WriteFile(s.path, []byte(`{"max_active":3,"connections":2,"overrides":{"queue:1":128}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err = loadSpeedSettings()
+	if err != nil || s.ManagementMode != "automatic" || s.MaxActive != 3 || s.Connections != 2 || s.Overrides["queue:1"] != 128 {
+		t.Fatalf("legacy migration: %+v %v", s, err)
+	}
+	s.ManagementMode = "manual"
+	if err := s.save(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = loadSpeedSettings()
+	if err != nil || s.ManagementMode != "manual" {
+		t.Fatal("explicit Manual choice was lost")
+	}
+	for _, input := range []string{`{"management_mode":"broken"}`, `{"total_requests":65}`, `{"total_requests":0}`, `{"origin_requests":0}`, `{"origin_requests":17}`} {
+		if err := os.WriteFile(s.path, []byte(input), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadSpeedSettings(); err == nil {
+			t.Fatalf("invalid management accepted: %s", input)
+		}
+	}
+}
+
+func TestManagementControlsCollapsedAndWaitForAcknowledgment(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	a := test.NewApp()
+	defer a.Quit()
+	w := a.NewWindow("management")
+	defer w.Close()
+	s, err := loadSpeedSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := os.ReadFile(s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pending func(error)
+	var submitted speedSettings
+	s.applyDownloads = func(next speedSettings, done func(error)) { submitted = next; pending = done }
+	page := s.page(w, nil, func() bool { return true })
+	w.SetContent(page)
+	w.Resize(fyne.NewSize(1100, 720))
+	w.Show()
+	if screenshot := os.Getenv("FLUXGET_AUTO_SETTINGS_SCREENSHOT"); screenshot != "" {
+		f, err := os.Create(screenshot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = png.Encode(f, w.Canvas().Capture())
+		f.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var accordion *widget.Accordion
+	var mode *widget.Select
+	var save *widget.Button
+	var walk func(fyne.CanvasObject)
+	walk = func(object fyne.CanvasObject) {
+		switch o := object.(type) {
+		case *container.Scroll:
+			walk(o.Content)
+		case *fyne.Container:
+			for _, child := range o.Objects {
+				walk(child)
+			}
+		case *widget.Accordion:
+			accordion = o
+			for _, item := range o.Items {
+				walk(item.Detail)
+			}
+		case *widget.Form:
+			for _, item := range o.Items {
+				walk(item.Widget)
+			}
+		case *widget.Select:
+			if len(o.Options) == 2 && o.Options[0] == "Automatic" {
+				mode = o
+			}
+		case *widget.Button:
+			if o.Text == "Save settings" {
+				save = o
+			}
+		}
+	}
+	walk(page)
+	if accordion == nil || mode == nil || save == nil || accordion.Items[0].Open || mode.Selected != "Automatic" {
+		t.Fatal("default requires manual setup or exposes all controls")
+	}
+	mode.SetSelected("Manual")
+	test.Tap(save)
+	if pending == nil || submitted.ManagementMode != "manual" {
+		t.Fatal("configuration was not submitted")
+	}
+	if s.ManagementMode != "automatic" {
+		t.Fatal("reported saved before scheduler acknowledgment")
+	}
+	data, _ := os.ReadFile(s.path)
+	if string(data) != string(original) {
+		t.Fatal("persisted policy before scheduler acknowledgment")
+	}
+	pending(os.ErrPermission)
+	if s.ManagementMode != "automatic" {
+		t.Fatal("rejected configuration changed settings")
+	}
+	test.Tap(save)
+	if err := submitted.save(); err != nil {
+		t.Fatal(err)
+	} // Simulate successful acknowledged transaction.
+	pending(nil)
+	loaded, err := loadSpeedSettings()
+	if err != nil || loaded.ManagementMode != "manual" || s.ManagementMode != "manual" {
+		t.Fatal("acknowledged Manual choice did not persist")
+	}
+	// Management configuration is explicit; private callbacks are never JSON.
+	if _, err := json.Marshal(s); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRequestWaitingRowsHaveHonestFiltersAndActions(t *testing.T) {
+	a := test.NewApp()
+	defer a.Quit()
+	w := a.NewWindow("requests")
+	defer w.Close()
+	s := &speedSettings{MaxActive: 5, Connections: 4, Overrides: map[string]int64{}}
+	v := newDownloadsView(a, w, s, nil, "")
+	w.SetContent(v.content)
+	v.ready = true
+	v.entries = []queueEntry{{ID: 1, State: "running", Destination: "/tmp/waiting", Requests: &jobBudgetSnapshot{Waiting: 4}}, {ID: 2, State: "running", Destination: "/tmp/active", Requests: &jobBudgetSnapshot{Active: 1}}}
+	if len(downloadRows(v.entries, nil, "Waiting")) != 1 || len(downloadRows(v.entries, nil, "Downloading")) != 1 {
+		t.Fatal("request wait was classified as active downloading")
+	}
+	v.category = "Waiting"
+	v.refresh()
+	v.list.Select(0)
+	if v.pause.Disabled() {
+		t.Fatal("request-waiting job cannot be paused")
+	}
+}

@@ -43,6 +43,9 @@ type desktopEntry struct {
 	queueJob
 	Speed *float64 `json:"speed_bytes_per_second,omitempty"`
 	segmentSnapshot
+	Measurements *measurementSnapshot `json:"measurements,omitempty"`
+	Observation  *transferObservation `json:"observation,omitempty"`
+	Requests     *jobBudgetSnapshot   `json:"requests,omitempty"`
 }
 
 func desktopEntries(jobs []queueJob, speeds map[int]*queueSpeed, layouts map[int]segmentSnapshot, now time.Time) []desktopEntry {

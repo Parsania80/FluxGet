@@ -100,7 +100,10 @@ func (b *limitedBody) Read(p []byte) (int, error) {
 		p = p[:int(max)]
 	}
 	n, err := b.ReadCloser.Read(p)
-	if waitErr := b.limit.wait(b.ctx, n); waitErr != nil {
+	started := time.Now()
+	waitErr := b.limit.wait(b.ctx, n)
+	measurementsFrom(b.ctx).addDuration(metricLimiterWait, time.Since(started))
+	if waitErr != nil {
 		return n, waitErr
 	}
 	return n, err

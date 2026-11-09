@@ -74,6 +74,19 @@ func downloadProgress(message, unit string) string {
 // Preserve the integer KiB/s storage format and exact existing settings while
 // displaying decimal units. New fractional limits round down to a whole KiB/s.
 func limitText(kib int64, unit string) string {
+	// Prefer a short rounded value only when saving it returns exactly the
+	// same engine limit. For example, 976 KiB/s can safely display as 1 MB/s.
+	value := float64(kib) * 1024 / float64(unitBytes(unit))
+	for precision := 0; precision <= 9; precision++ {
+		text := strconv.FormatFloat(value, 'f', precision, 64)
+		if parsed, err := parseDisplayLimit(text, unit, true); err == nil && parsed == kib {
+			return text
+		}
+	}
+	return exactLimitText(kib, unit)
+}
+
+func exactLimitText(kib int64, unit string) string {
 	precision := 3
 	switch displayUnit(unit) {
 	case "MB":
@@ -87,7 +100,7 @@ func limitText(kib int64, unit string) string {
 
 func parseDisplayLimit(text, unit string, allowZero bool) (int64, error) {
 	text = strings.TrimSpace(text)
-	invalid := errors.New("Enter a valid speed in " + displayUnit(unit) + "/s; the minimum nonzero limit is " + limitText(1, unit) + " " + displayUnit(unit) + "/s.")
+	invalid := errors.New("Enter a valid speed in " + displayUnit(unit) + "/s; the minimum nonzero limit is " + exactLimitText(1, unit) + " " + displayUnit(unit) + "/s.")
 	if text == "" || len(text) > 64 || strings.ContainsAny(text, "/eEpPxX") {
 		return 0, invalid
 	}

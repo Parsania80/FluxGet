@@ -42,24 +42,32 @@ func checkpointLocation(destination string) (string, error) {
 }
 
 func saveInterrupted(path string, partial *os.File, c *checkpoint, written int64) error {
+	return saveInterruptedObserved(context.Background(), path, partial, c, written)
+}
+
+func saveInterruptedObserved(ctx context.Context, path string, partial *os.File, c *checkpoint, written int64) error {
 	if c == nil || written < 0 || (c.Total != nil && written > *c.Total) {
 		return nil
 	}
 	hash := sha256.New()
-	if _, err := io.CopyN(hash, io.NewSectionReader(partial, 0, written), written); err != nil {
+	if _, err := hashTransferRange(ctx, partial, 0, written, hash); err != nil {
 		return fmt.Errorf("hash partial file: %w", err)
 	}
 	c.Completed = written
 	c.PrefixSHA256 = hex.EncodeToString(hash.Sum(nil))
 	c.Version = 2
 	c.State = "interrupted"
-	if err := saveCheckpoint(path, partial, *c); err != nil {
+	if err := saveTransferCheckpoint(ctx, path, partial, *c); err != nil {
 		return fmt.Errorf("save recovery checkpoint: %w", err)
 	}
 	return nil
 }
 
 func checkpointProgress(path string, partial *os.File, c *checkpoint, digest hash.Hash, last int64) func(int64) error {
+	return checkpointProgressObserved(context.Background(), path, partial, c, digest, last)
+}
+
+func checkpointProgressObserved(ctx context.Context, path string, partial *os.File, c *checkpoint, digest hash.Hash, last int64) func(int64) error {
 	return func(written int64) error {
 		if written-last < 1<<20 || written >= *c.Total {
 			return nil
@@ -67,7 +75,7 @@ func checkpointProgress(path string, partial *os.File, c *checkpoint, digest has
 		updated := *c
 		updated.Completed = written
 		updated.PrefixSHA256 = hex.EncodeToString(digest.Sum(nil))
-		if err := saveCheckpoint(path, partial, updated); err != nil {
+		if err := saveTransferCheckpoint(ctx, path, partial, updated); err != nil {
 			return fmt.Errorf("save recovery checkpoint: %w", err)
 		}
 		last = written
@@ -76,6 +84,10 @@ func checkpointProgress(path string, partial *os.File, c *checkpoint, digest has
 }
 
 func saveReadyCheckpoint(path string, partial *os.File, c *checkpoint, written int64, digest hash.Hash) error {
+	return saveReadyCheckpointObserved(context.Background(), path, partial, c, written, digest)
+}
+
+func saveReadyCheckpointObserved(ctx context.Context, path string, partial *os.File, c *checkpoint, written int64, digest hash.Hash) error {
 	ready := *c
 	ready.Version = 2
 	ready.Chunks = nil
@@ -83,7 +95,7 @@ func saveReadyCheckpoint(path string, partial *os.File, c *checkpoint, written i
 	ready.Total = &written
 	ready.Completed = written
 	ready.PrefixSHA256 = hex.EncodeToString(digest.Sum(nil))
-	if err := saveCheckpoint(path, partial, ready); err != nil {
+	if err := saveTransferCheckpoint(ctx, path, partial, ready); err != nil {
 		return fmt.Errorf("save final publication checkpoint; partial file kept: %w", err)
 	}
 	clearPartialToken(partial, c.PartialToken)
@@ -166,7 +178,7 @@ func resumeDownloadWithLimit(ctx context.Context, client *http.Client, destinati
 		return resumeChunks(ctx, client, path, partial, c, expectedSHA256, progress, connections)
 	}
 	hash := sha256.New()
-	if _, err := io.CopyN(hash, io.NewSectionReader(partial, 0, c.Completed), c.Completed); err != nil || !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), c.PrefixSHA256) {
+	if _, err := hashTransferRange(ctx, partial, 0, c.Completed, hash); err != nil || !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), c.PrefixSHA256) {
 		return 0, errors.New("saved partial file does not match its checkpoint")
 	}
 	c.ExpectedSHA256 = expectedSHA256
@@ -226,7 +238,7 @@ func resumeDownloadWithLimit(ctx context.Context, client *http.Client, destinati
 	}
 	c.Version = 2
 	c.State = "downloading"
-	if err := saveCheckpoint(path, partial, c); err != nil {
+	if err := saveTransferCheckpoint(ctx, path, partial, c); err != nil {
 		return 0, fmt.Errorf("save active job state: %w", err)
 	}
 	if err := partial.Truncate(c.Completed); err != nil {
@@ -235,12 +247,12 @@ func resumeDownloadWithLimit(ctx context.Context, client *http.Client, destinati
 	if _, err := partial.Seek(c.Completed, io.SeekStart); err != nil {
 		return 0, fmt.Errorf("seek partial file: %w", err)
 	}
-	tracker := &progressWriter{writer: io.MultiWriter(partial, hash), output: progress, total: *c.Total, written: c.Completed, startWritten: c.Completed, start: time.Now()}
+	tracker := &progressWriter{writer: io.MultiWriter(measuredFileWriter{partial, measurementsFrom(ctx)}, hash), output: progress, total: *c.Total, written: c.Completed, startWritten: c.Completed, start: time.Now()}
 	segments := newSegmentSession(progress, "sequential", 1, []transferSegment{{Start: 0, End: *c.Total, Downloaded: c.Completed, State: "downloading"}})
 	complete := false
 	defer func() { segments.finish(ctx, complete) }()
 	tracker.segment, tracker.segments = segments.part(0), segments
-	tracker.checkpoint = checkpointProgress(path, partial, &c, hash, c.Completed)
+	tracker.checkpoint = checkpointProgressObserved(ctx, path, partial, &c, hash, c.Completed)
 	tracker.report()
 	written, err := io.Copy(tracker, io.LimitReader(response.Body, *c.Total-c.Completed+1))
 	tracker.report()
@@ -249,7 +261,7 @@ func resumeDownloadWithLimit(ctx context.Context, client *http.Client, destinati
 		if err == nil {
 			err = io.ErrUnexpectedEOF
 		}
-		return totalWritten, errors.Join(fmt.Errorf("resume failed; partial data kept: %w", err), saveInterrupted(path, partial, &c, totalWritten))
+		return totalWritten, errors.Join(fmt.Errorf("resume failed; partial data kept: %w", err), saveInterruptedObserved(ctx, path, partial, &c, totalWritten))
 	}
 	if err := ctx.Err(); err != nil {
 		return totalWritten, fmt.Errorf("download canceled; partial data kept: %w", err)
@@ -259,10 +271,10 @@ func resumeDownloadWithLimit(ctx context.Context, client *http.Client, destinati
 	}
 	tracker.segment.setState(segmentVerifying)
 	segments.publish()
-	if err := partial.Sync(); err != nil {
+	if err := syncTransferFile(ctx, partial); err != nil {
 		return totalWritten, fmt.Errorf("sync partial file: %w", err)
 	}
-	if err := saveReadyCheckpoint(path, partial, &c, totalWritten, hash); err != nil {
+	if err := saveReadyCheckpointObserved(ctx, path, partial, &c, totalWritten, hash); err != nil {
 		return totalWritten, err
 	}
 	if err := partial.Close(); err != nil {

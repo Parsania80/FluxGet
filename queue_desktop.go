@@ -12,19 +12,21 @@ import (
 
 // Desktop requests are processed by the queue owner, never by transfer workers.
 type desktopRequest struct {
-	ID          int      `json:"id"`
-	Operation   string   `json:"operation"`
-	Job         queueJob `json:"job"`
-	MaxActive   int      `json:"max_active"`
-	Connections int      `json:"connections"`
+	ID          int            `json:"id"`
+	Operation   string         `json:"operation"`
+	Job         queueJob       `json:"job"`
+	MaxActive   int            `json:"max_active"`
+	Connections int            `json:"connections"`
+	Management  *requestPolicy `json:"management,omitempty"`
 }
 
 type desktopResponse struct {
-	Revision uint64         `json:"revision"`
-	ID       int            `json:"id"`
-	JobID    int            `json:"job_id,omitempty"`
-	Jobs     []desktopEntry `json:"jobs,omitempty"`
-	Error    string         `json:"error,omitempty"`
+	Revision   uint64          `json:"revision"`
+	ID         int             `json:"id"`
+	JobID      int             `json:"job_id,omitempty"`
+	Jobs       []desktopEntry  `json:"jobs,omitempty"`
+	Error      string          `json:"error,omitempty"`
+	Management *budgetSnapshot `json:"management,omitempty"`
 }
 
 func backupQueue(path string) error {

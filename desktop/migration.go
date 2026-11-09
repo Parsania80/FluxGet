@@ -45,7 +45,8 @@ func migrateDownloads(ctx context.Context, q *queueClient, history []job, settin
 			return history, nil, fmt.Errorf("back up download metadata: %w", err)
 		}
 	}
-	response, err := q.request(ctx, desktopRequest{Operation: "initialize"})
+	policy := settings.requestPolicy()
+	response, err := q.request(ctx, desktopRequest{Operation: "initialize", Management: &policy})
 	if err != nil {
 		return history, nil, err
 	}
