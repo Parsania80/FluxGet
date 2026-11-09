@@ -103,6 +103,8 @@ type desktopRequest struct {
 	MaxActive   int            `json:"max_active"`
 	Connections int            `json:"connections"`
 	Management  *requestPolicy `json:"management,omitempty"`
+	Action      string         `json:"action,omitempty"`
+	File        *replacement   `json:"file,omitempty"`
 }
 
 type desktopResponse struct {

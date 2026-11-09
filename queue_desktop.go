@@ -18,6 +18,14 @@ type desktopRequest struct {
 	MaxActive   int            `json:"max_active"`
 	Connections int            `json:"connections"`
 	Management  *requestPolicy `json:"management,omitempty"`
+	Action      string         `json:"action,omitempty"`
+	File        *outputRemoval `json:"file,omitempty"`
+}
+
+type outputRemoval struct {
+	Path           string
+	Device, Inode  uint64
+	Size, Modified int64
 }
 
 type desktopResponse struct {

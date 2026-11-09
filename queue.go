@@ -327,6 +327,59 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 				changed := false
 				if requestErr == nil {
 					switch req.Operation {
+					case "action":
+						i := find(req.Job.ID)
+						if i < 0 {
+							requestErr = errors.New("download no longer exists")
+							break
+						}
+						j := &q.Jobs[i]
+						if requested[j.ID] != "" {
+							requestErr = errors.New("download is still stopping; try again shortly")
+							break
+						}
+						if req.Action == "remove" || req.Action == "delete" || req.Action == "discard" {
+							if j.State == "running" || j.State == "queued" || (j.State == "resetting" && req.Action != "delete" && req.Action != "discard") {
+								requestErr = errors.New("stop the download before removing it")
+								break
+							}
+							if req.Action != "remove" {
+								if req.Job.Destination != j.Destination {
+									requestErr = errors.New("download destination changed; review the selection again")
+									break
+								}
+								fatal := false
+								if req.Action == "delete" {
+									fatal, requestErr = deleteQueueFiles(&q, i, path, req.File)
+								} else if j.State == "completed" {
+									requestErr = errors.New("completed downloads have no partial data to discard")
+								} else {
+									fatal, requestErr = cleanupQueueJob(&q, i, path, "discard")
+								}
+								if fatal {
+									shutdown(requestErr)
+								}
+								if requestErr != nil {
+									break
+								}
+							}
+							if req.Action != "discard" {
+								delete(layouts, j.ID)
+								q.Jobs = append(q.Jobs[:i], q.Jobs[i+1:]...)
+							}
+							changed = true
+							break
+						}
+						next := queueActionState(j.State, req.Action)
+						if next == "" {
+							requestErr = errors.New("action is not available for this download state")
+						} else if cancel := active[j.ID]; cancel != nil {
+							requested[j.ID] = next
+							cancel()
+						} else {
+							j.State, j.Message = next, ""
+							changed = true
+						}
 					case "initialize":
 						if len(active) != 0 {
 							requestErr = errors.New("cannot initialize a desktop session while downloads are active")
@@ -573,25 +626,8 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 					fmt.Fprintln(output, "Job is already stopping.")
 					continue
 				}
-				next := ""
-				switch command {
-				case "pause":
-					if j.State == "queued" || j.State == "running" {
-						next = "paused"
-					}
-				case "resume":
-					if j.State == "paused" {
-						next = "queued"
-					}
-				case "cancel":
-					if j.State == "queued" || j.State == "running" || j.State == "paused" || j.State == "failed" {
-						next = "canceled"
-					}
-				case "retry":
-					if j.State == "failed" || j.State == "canceled" {
-						next = "queued"
-					}
-				case "remove":
+				next := queueActionState(j.State, command)
+				if command == "remove" {
 					if j.State != "running" && j.State != "queued" && j.State != "resetting" {
 						q.Jobs = append(q.Jobs[:i], q.Jobs[i+1:]...)
 						delete(layouts, id)

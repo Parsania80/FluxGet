@@ -85,6 +85,7 @@ type downloadsView struct {
 	restoring                                                bool
 	closeDone                                                func()
 	category, selected                                       string
+	checked                                                  map[string]bool
 	prompted                                                 map[int]string
 	finishing                                                map[int]bool
 	content                                                  fyne.CanvasObject
@@ -95,24 +96,39 @@ type downloadsView struct {
 	partKey                                                  string
 	partDetails                                              *fyne.Container
 	status, summary                                          *widget.Label
+	selectionCount                                           *widget.Label
 	management                                               *budgetSnapshot
 	empty                                                    fyne.CanvasObject
 	add, pause, resume, retry, open, folder, more, reconnect *widget.Button
+	remove, selectAll, clearSelection                        *widget.Button
 }
 
 func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, history []job, executable string) *downloadsView {
-	v := &downloadsView{app: a, window: w, settings: settings, history: history, executable: executable, category: "All downloads", prompted: map[int]string{}, finishing: map[int]bool{}}
+	v := &downloadsView{app: a, window: w, settings: settings, history: history, executable: executable, category: "All downloads", checked: map[string]bool{}, prompted: map[int]string{}, finishing: map[int]bool{}}
 	v.status = widget.NewLabel("Preparing your downloads…")
 	v.status.Wrapping = fyne.TextWrapWord
 	v.summary = widget.NewLabel("")
 	v.add = widget.NewButtonWithIcon("Add download", theme.ContentAddIcon(), v.addDialog)
 	v.add.Importance = widget.HighImportance
 	v.pause = widget.NewButtonWithIcon("Pause", theme.MediaPauseIcon(), func() { v.command("pause") })
-	v.resume = widget.NewButtonWithIcon("Resume", theme.MediaPlayIcon(), func() { v.resumeSelected() })
+	v.resume = widget.NewButtonWithIcon("Start / Resume", theme.MediaPlayIcon(), func() { v.resumeSelected() })
 	v.retry = widget.NewButtonWithIcon("Retry", theme.ViewRefreshIcon(), func() { v.command("retry") })
 	v.open = widget.NewButtonWithIcon("Open file", theme.DocumentIcon(), func() { v.openSelected(false) })
 	v.folder = widget.NewButtonWithIcon("Show in folder", theme.FolderOpenIcon(), func() { v.openSelected(true) })
 	v.more = widget.NewButton("More…", v.moreActions)
+	v.remove = widget.NewButtonWithIcon("Remove…", theme.DeleteIcon(), v.removalMenu)
+	v.selectionCount = widget.NewLabel("0 selected")
+	v.selectAll = widget.NewButton("Select all", func() {
+		for _, row := range v.rows() {
+			v.checked[row.Key] = true
+		}
+		v.refresh()
+	})
+	v.clearSelection = widget.NewButton("Clear selection", func() {
+		clear(v.checked)
+		v.selected = ""
+		v.refresh()
+	})
 	v.reconnect = widget.NewButton("Try again", v.connect)
 	v.reconnect.Hide()
 	v.list = widget.NewList(func() int { return len(v.rows()) }, func() fyne.CanvasObject {
@@ -120,7 +136,7 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 		name.Truncation = fyne.TextTruncateEllipsis
 		detail := widget.NewLabel("Status")
 		detail.Wrapping = fyne.TextWrapWord
-		controls := container.NewHBox(widget.NewLabelWithStyle("Speed: —", fyne.TextAlignTrailing, fyne.TextStyle{Bold: true}), widget.NewButton("Limit: default", nil), widget.NewButton("Remove limit", nil))
+		controls := container.NewHBox(widget.NewLabelWithStyle("Speed: —", fyne.TextAlignTrailing, fyne.TextStyle{Bold: true}), widget.NewButton("Limit: default", nil), widget.NewButton("Remove limit", nil), widget.NewCheck("Select", nil))
 		return container.NewVBox(container.NewBorder(nil, nil, nil, controls, name), detail, progressLine(), newSegmentPanel())
 	}, func(id widget.ListItemID, object fyne.CanvasObject) {
 		rows := v.rows()
@@ -137,6 +153,26 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 		}
 		line.Objects[0].(*widget.Label).SetText(name)
 		controls := line.Objects[1].(*fyne.Container)
+		check := controls.Objects[3].(*widget.Check)
+		check.OnChanged = nil
+		check.SetChecked(v.checked[row.Key])
+		check.OnChanged = func(checked bool) {
+			v.restoring = true
+			v.list.UnselectAll()
+			v.selected = ""
+			v.restoring = false
+			if checked {
+				v.checked[row.Key] = true
+			} else {
+				delete(v.checked, row.Key)
+			}
+			v.actions()
+		}
+		if v.busy || v.closing {
+			check.Disable()
+		} else {
+			check.Enable()
+		}
 		controls.Objects[0].(*widget.Label).SetText(downloadSpeed(j, v.settings.DisplayUnit))
 		button := controls.Objects[1].(*widget.Button)
 		bindLimitButton(button, v.settings, row.Key, name, func(key, filename string) { v.settings.editDownload(w, key, filename, v.refresh) })
@@ -194,7 +230,13 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 			v.actions()
 		}
 	}
-	categories := widget.NewRadioGroup([]string{"All downloads", "Downloading", "Waiting", "Paused", "Completed", "Failed"}, func(category string) { v.category = category; v.selected = ""; v.list.UnselectAll(); v.refresh() })
+	categories := widget.NewRadioGroup([]string{"All downloads", "Downloading", "Waiting", "Paused", "Completed", "Failed"}, func(category string) {
+		v.category = category
+		v.selected = ""
+		clear(v.checked)
+		v.list.UnselectAll()
+		v.refresh()
+	})
 	v.filters = categories
 	sidebar := container.NewPadded(container.NewVBox(widget.NewLabelWithStyle("DOWNLOADS", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), categories))
 	emptyTitle := widget.NewLabelWithStyle("Your downloads appear here", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
@@ -207,7 +249,8 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 	split.Offset = 0.19
 	title := widget.NewLabelWithStyle("Downloads", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	toolbar := container.NewHBox(v.add, v.pause, v.resume, v.retry, v.open, v.folder, v.more)
-	top := container.NewPadded(container.NewVBox(title, v.summary, toolbar, widget.NewSeparator()))
+	selectionBar := container.NewHBox(v.selectAll, v.clearSelection, v.selectionCount, v.remove)
+	top := container.NewPadded(container.NewVBox(title, v.summary, toolbar, selectionBar, widget.NewSeparator()))
 	downloads := container.NewBorder(top, nil, nil, nil, split)
 	settings.applyDownloads = v.applySettings
 	settingsPage := settings.page(w, func() { v.refresh() }, func() bool { return v.ready && !v.busy && !v.closing })
@@ -228,44 +271,58 @@ func (v *downloadsView) selection() (downloadRow, bool) {
 	return downloadRow{}, false
 }
 func (v *downloadsView) actions() {
-	for _, button := range []*widget.Button{v.pause, v.resume, v.retry, v.open, v.folder, v.more} {
+	for _, button := range []*widget.Button{v.pause, v.resume, v.retry, v.open, v.folder, v.more, v.remove, v.selectAll, v.clearSelection} {
 		button.Disable()
 	}
 	v.add.Disable()
+	rows := v.selectedRows()
+	v.selectionCount.SetText(fmt.Sprintf("%d selected", len(rows)))
 	if v.ready && !v.busy && !v.closing {
 		v.add.Enable()
 	} else {
 		return
 	}
-	row, ok := v.selection()
-	if !ok {
+	if len(v.rows()) > 0 {
+		v.selectAll.Enable()
+	}
+	if len(rows) == 0 {
 		return
 	}
-	j := row.Entry
+	v.clearSelection.Enable()
 	v.more.Enable()
-	if j.output() != "" {
-		v.folder.Enable()
+	v.remove.Enable()
+	if len(rows) == 1 {
+		j := rows[0].Entry
+		if j.output() != "" {
+			v.folder.Enable()
+		}
+		if downloadState(j.State) == "Completed" || j.State == "Already exists" {
+			v.open.Enable()
+		}
 	}
-	if downloadState(j.State) == "Completed" || j.State == "Already exists" {
-		v.open.Enable()
-	}
-	if j.ID == 0 {
-		if downloadState(j.State) == "Paused" {
+	for _, row := range rows {
+		if batchAction(row.Entry, "pause") != "" {
+			v.pause.Enable()
+		}
+		if batchAction(row.Entry, "start") != "" {
 			v.resume.Enable()
 		}
-		return
-	}
-	switch j.State {
-	case "running", "queued":
-		v.pause.Enable()
-	case "paused":
-		v.resume.Enable()
-	case "failed", "canceled":
-		v.retry.Enable()
+		if batchAction(row.Entry, "retry") != "" {
+			v.retry.Enable()
+		}
 	}
 }
 func (v *downloadsView) refresh() {
 	selected := v.selected
+	visible := make(map[string]bool)
+	for _, row := range v.rows() {
+		visible[row.Key] = true
+	}
+	for key := range v.checked {
+		if !visible[key] {
+			delete(v.checked, key)
+		}
+	}
 	v.restoring = true
 	v.list.UnselectAll()
 	rows := v.rows()
@@ -488,11 +545,7 @@ func (v *downloadsView) configure() {
 	}, nil)
 }
 func (v *downloadsView) command(action string) {
-	row, ok := v.selection()
-	if !ok || row.Entry.ID == 0 {
-		return
-	}
-	v.perform(action, row.Entry.ID)
+	v.batch(action, v.selectedRows(), nil)
 }
 
 func (v *downloadsView) perform(action string, id int) {
@@ -508,39 +561,14 @@ func (v *downloadsView) perform(action string, id int) {
 	}, nil)
 }
 func (v *downloadsView) resumeSelected() {
-	row, ok := v.selection()
-	if !ok {
-		return
-	}
-	if row.Entry.ID > 0 {
-		v.command("resume")
-		return
-	}
-	v.work(func(q *queueClient) (desktopResponse, error) {
-		return callDesktop(q, desktopRequest{Operation: "adopt", Job: row.Entry})
-	}, func(response desktopResponse) {
-		v.history[row.HistoryIndex].QueueID = response.JobID
-		if err := saveHistory(v.history); err != nil {
-			dialog.ShowError(err, v.window)
-			return
-		}
-		if limit := v.settings.Overrides[row.Key]; limit > 0 {
-			v.settings.Overrides[fmt.Sprintf("queue:%d", response.JobID)] = limit
-			if err := v.settings.save(); err != nil {
-				dialog.ShowError(err, v.window)
-				return
-			}
-		}
-		v.selected = fmt.Sprintf("queue:%d", response.JobID)
-		v.refresh()
-		v.perform("resume", response.JobID)
-	})
+	v.batch("start", v.selectedRows(), nil)
 }
 func (v *downloadsView) openSelected(folder bool) {
-	row, ok := v.selection()
-	if !ok || row.Entry.output() == "" {
+	rows := v.selectedRows()
+	if len(rows) != 1 || rows[0].Entry.output() == "" {
 		return
 	}
+	row := rows[0]
 	path := row.Entry.output()
 	if folder {
 		path = filepath.Dir(path)
@@ -550,38 +578,27 @@ func (v *downloadsView) openSelected(folder bool) {
 	}
 }
 func (v *downloadsView) moreActions() {
-	row, ok := v.selection()
-	if !ok {
+	rows := v.selectedRows()
+	if len(rows) == 0 {
 		return
 	}
-	cancel := fyne.NewMenuItem("Cancel download (keep files)", func() { v.perform("cancel", row.Entry.ID) })
-	cancel.Disabled = row.Entry.ID == 0 || !(row.Entry.State == "running" || row.Entry.State == "queued" || row.Entry.State == "paused" || row.Entry.State == "failed")
-	remove := fyne.NewMenuItem("Remove from history…", func() {
-		dialog.ShowConfirm("Remove from history?", "Downloaded files and saved partial data will be kept.", func(yes bool) {
-			if !yes {
-				return
-			}
-			if row.Entry.ID == 0 {
-				v.history[row.HistoryIndex].Archived = true
-				if err := saveHistory(v.history); err != nil {
-					dialog.ShowError(err, v.window)
-				}
-				v.refresh()
-			} else {
-				v.perform("remove", row.Entry.ID)
-			}
-		}, v.window)
-	})
-	remove.Disabled = row.Entry.State == "running" || row.Entry.State == "queued" || row.Entry.State == "resetting" || v.finishing[row.Entry.ID]
-	discard := fyne.NewMenuItem("Delete saved partial data…", func() {
-		dialog.ShowConfirm("Delete saved partial data?", "This removes only partial data verified as belonging to this download. Completed files are kept. This cannot be undone.", func(yes bool) {
+	cancel := fyne.NewMenuItem("Cancel downloads (keep files)", func() { v.batch("cancel", rows, nil) })
+	cancel.Disabled = true
+	for _, row := range rows {
+		if batchAction(row.Entry, "cancel") != "" {
+			cancel.Disabled = false
+		}
+	}
+	remove := fyne.NewMenuItem("Remove from list (keep files)…", func() { v.confirmRemoval(rows, false) })
+	deleteFiles := fyne.NewMenuItem("Delete files from disk…", func() { v.confirmRemoval(rows, true) })
+	discard := fyne.NewMenuItem("Delete saved partial data only…", func() {
+		dialog.ShowConfirm("Delete saved partial data?", "Selected active downloads will stop first. Only verified partial data is deleted; completed files and list entries are kept. This cannot be undone.", func(yes bool) {
 			if yes {
-				v.perform("discard", row.Entry.ID)
+				v.batch("discard", rows, nil)
 			}
 		}, v.window)
 	})
-	discard.Disabled = row.Entry.ID == 0 || !(row.Entry.State == "paused" || row.Entry.State == "failed" || row.Entry.State == "canceled")
-	menu := widget.NewPopUpMenu(fyne.NewMenu("Download", cancel, remove, fyne.NewMenuItemSeparator(), discard), v.window.Canvas())
+	menu := widget.NewPopUpMenu(fyne.NewMenu("Downloads", cancel, remove, deleteFiles, fyne.NewMenuItemSeparator(), discard), v.window.Canvas())
 	menu.ShowAtPosition(v.app.Driver().AbsolutePositionForObject(v.more).Add(fyne.NewPos(0, v.more.Size().Height)))
 }
 func (v *downloadsView) close(done func()) {

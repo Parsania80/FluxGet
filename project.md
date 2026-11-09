@@ -507,6 +507,7 @@ The operator selected a Go desktop app using Fyne on 2026-11-05. The current pro
 - [x] Route all new desktop jobs through one scheduler and one simultaneous-download limit. Put concurrency, connection limits, default folder, and per-download/overall speed settings in Settings.
 - [ ] Show filename, progress, speed, useful remaining time, state, and a short failure explanation in each row; support long filenames, unknown totals, keyboard navigation, and readable labels.
 - [x] Offer contextual Pause, Resume, Retry, Open file, Show in folder, and Cancel actions; separate remove-from-history from confirmed deletion of verified partial data.
+- [x] Add stable row checkboxes, visible-list Select all/Clear selection, and batch Start/Resume, Pause, Retry, Cancel, list-only removal, and confirmed disk deletion. The queue owner stops writers before removal, verifies completed-file identity against confirmation, and reuses owned partial cleanup. Failures remain visible, hidden selections clear on filtering, and archived entries prevent rediscovery after list-only removal. Real controller/HTTP tests and rendered list/confirmation checks passed; installed preview updated on 2026-11-09.
 - [x] Resolve safe server-provided filenames in the queue owner before writing body data, reserving paths against other jobs. Preserve copy/replacement choices and existing output protections.
 - [x] Define single-owner startup/shutdown and migrate history, queue IDs, speed-limit keys, and imported checkpoints with metadata backups. Repeated adoption matches both destination and source identity.
 - [x] Preserve completed history, saved progress, and partial files during migration without starting network transfers. Keep unimportable history visible.
@@ -695,7 +696,7 @@ The following priority order reflects the operator's 2026-11-09 feedback. Browse
 | # | Task | Status | Notes |
 | --- | --- | --- | --- |
 | 1 | CLI and desktop prototype baseline | ✅ Done | Commit 12635b4 installed locally; recorded automated checks cover the prototype, not full release acceptance |
-| 2 | Simplify Downloads and queue interaction | 🔄 Current | Implementation, automated coverage, and local preview installation complete; operator interactive acceptance remains |
+| 2 | Simplify Downloads and queue interaction | 🔄 Current | Implementation, automated coverage, and local preview installation complete; operator approved the installed preview on 2026-11-09, with detailed interactive acceptance still open |
 | 3 | Automatic download management | 🔄 Current | Stage 1 implemented: measurements and request budgets, Automatic by default with optional customization; next is safe live worker resizing |
 | 4 | Browser capability spike and native-bridge contract | ⬜ Todo | After the selected Automatic foundations; check Chrome, Firefox, and Opera capabilities and package constraints |
 | 5 | Shared intake, native host, and manual Send to FluxGet | ⬜ Todo | Versioned protocol, one owner, idempotent pending requests, extension connection tests |
@@ -706,7 +707,7 @@ The following priority order reflects the operator's 2026-11-09 feedback. Browse
 | 10 | Multi-interface experiment | ⬜ Todo | Later; keep platform and routing evidence requirements from Phase 8 |
 | 11 | Authenticated browser downloads | ⬜ Todo | Separate credential and request-replay design; unsupported in the initial integration |
 
-### ➡️ Current: #2 - Simplify Downloads and queue interaction
+### ➡️ Current: #3 - Automatic download management
 ### ⏭️ Next: #3 stage 2 - Safe live worker resizing
 
-**Next concrete action:** Interactively review the unified Downloads preview: add several files, check Waiting and Download later, pause/resume, inspect Settings, and verify completed-file actions. Resolve any remaining usability issues, then implement Automatic stage 2: safe live worker resizing within existing saved part boundaries. Stage 1 measurements and request budgets are implemented; throughput-driven tuning, hardware feedback, browser extensions, and a native host remain unimplemented.
+**Next concrete action:** Following the operator's approval of the installed preview on 2026-11-09, implement Automatic stage 2: safe live worker resizing within existing saved part boundaries. Verify 1→2→4→1 active workers during a real local HTTP transfer, repeated retirement/resume, saved offsets, checkpoint failures, and byte-identical output under the race detector. Detailed desktop acceptance remains open alongside this work. Stage 1 measurements and request budgets are implemented; throughput-driven tuning, hardware feedback, browser extensions, and a native host remain unimplemented.
