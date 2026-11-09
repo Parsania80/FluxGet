@@ -15,9 +15,11 @@ import (
 
 // Chunk boundaries are half-open: Start is included and End is excluded.
 type savedChunk struct {
-	Start  int64  `json:"start"`
-	End    int64  `json:"end"`
-	SHA256 string `json:"sha256,omitempty"`
+	Start        int64  `json:"start"`
+	End          int64  `json:"end"`
+	SHA256       string `json:"sha256,omitempty"`
+	Downloaded   int64  `json:"downloaded,omitempty"`
+	PrefixSHA256 string `json:"prefix_sha256,omitempty"`
 }
 
 // A checkpoint is metadata, not proof that local or remote data is unchanged.
@@ -43,7 +45,7 @@ func (c checkpoint) validate() error {
 	if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil {
 		return errors.New("invalid checkpoint URL")
 	}
-	if (c.Version != 1 && c.Version != 2 && c.Version != 3) || !filepath.IsAbs(c.Destination) || c.Partial != c.Destination+".part" || c.Completed < 0 ||
+	if (c.Version != 1 && c.Version != 2 && c.Version != 3 && c.Version != 4) || !filepath.IsAbs(c.Destination) || c.Partial != c.Destination+".part" || c.Completed < 0 ||
 		(c.Total != nil && (*c.Total < 0 || c.Completed > *c.Total)) ||
 		(c.State != "" && c.State != "downloading" && c.State != "interrupted" && c.State != "ready") ||
 		(c.Version == 1 && c.State != "" && c.State != "ready") {
@@ -58,10 +60,10 @@ func (c checkpoint) validate() error {
 	if c.PartialIdentity != nil && c.PartialIdentity.Inode == 0 {
 		return errors.New("invalid partial identity")
 	}
-	if c.Version != 3 && len(c.Chunks) != 0 {
-		return errors.New("chunks require version-three metadata")
+	if !c.parallel() && len(c.Chunks) != 0 {
+		return errors.New("chunks require parallel metadata")
 	}
-	if c.Version == 3 {
+	if c.parallel() {
 		if c.Total == nil || *c.Total <= 0 || len(c.Chunks) < 1 || len(c.Chunks) > 16 || c.PrefixSHA256 != "" || !strongETag(c.ETag) || !validQueueURL(c.ResolvedURL) || (c.State != "downloading" && c.State != "interrupted") {
 			return errors.New("invalid chunk metadata")
 		}
@@ -70,13 +72,20 @@ func (c checkpoint) validate() error {
 			if chunk.Start != next || chunk.End <= chunk.Start || chunk.End > *c.Total {
 				return errors.New("invalid chunk boundaries")
 			}
-			if chunk.SHA256 != "" {
-				digest, err := hex.DecodeString(chunk.SHA256)
-				if err != nil || len(digest) != sha256.Size {
-					return errors.New("invalid chunk digest")
-				}
-				completed += chunk.End - chunk.Start
+			size := chunk.End - chunk.Start
+			if c.Version == 3 && (chunk.Downloaded != 0 || chunk.PrefixSHA256 != "") {
+				return errors.New("partial chunk prefixes require version-four metadata")
 			}
+			if chunk.SHA256 != "" {
+				if !validChunkDigest(chunk.SHA256) || chunk.PrefixSHA256 != "" || (c.Version == 4 && chunk.Downloaded != size) {
+					return errors.New("invalid completed chunk digest or length")
+				}
+			} else if c.Version == 4 {
+				if chunk.Downloaded < 0 || chunk.Downloaded >= size || (chunk.Downloaded == 0 && chunk.PrefixSHA256 != "") || (chunk.Downloaded > 0 && !validChunkDigest(chunk.PrefixSHA256)) {
+					return errors.New("invalid chunk prefix digest or length")
+				}
+			}
+			completed += chunk.savedLength()
 			next = chunk.End
 		}
 		if next != *c.Total || completed != c.Completed {
@@ -86,7 +95,26 @@ func (c checkpoint) validate() error {
 	return nil
 }
 
-// saveCheckpoint requires ownership; saved ranges must be complete and immutable.
+func (c checkpoint) parallel() bool { return c.Version == 3 || c.Version == 4 }
+
+func (c savedChunk) savedLength() int64 {
+	if c.SHA256 != "" {
+		return c.End - c.Start
+	}
+	return c.Downloaded
+}
+func (c savedChunk) savedDigest() string {
+	if c.SHA256 != "" {
+		return c.SHA256
+	}
+	return c.PrefixSHA256
+}
+func validChunkDigest(value string) bool {
+	digest, err := hex.DecodeString(value)
+	return err == nil && len(digest) == sha256.Size
+}
+
+// saveCheckpoint requires ownership; saved prefixes must be immutable.
 func saveCheckpoint(path string, partial *os.File, c checkpoint) error {
 	return saveCheckpointWithHook(path, partial, c, nil)
 }
@@ -130,7 +158,7 @@ func saveCheckpointWithHook(path string, partial *os.File, c checkpoint, hook fu
 		return errors.New("partial file does not match checkpoint")
 	}
 	for _, chunk := range c.Chunks {
-		if chunk.SHA256 != "" && opened.Size() < chunk.End {
+		if chunk.savedLength() > 0 && opened.Size() < chunk.Start+chunk.savedLength() {
 			return errors.New("saved chunk exceeds partial file")
 		}
 	}

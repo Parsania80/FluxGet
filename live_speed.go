@@ -11,6 +11,7 @@ type liveSpeedConfig struct {
 	Enabled   bool             `json:"enabled"`
 	Default   int64            `json:"default_kib"`
 	Overrides map[string]int64 `json:"overrides"`
+	Overall   int64            `json:"overall_kib"`
 }
 
 type liveSpeedKey struct{}
@@ -32,6 +33,12 @@ func (l *speedLimiter) liveRate() int64 {
 	rate := int64(0)
 	if c.Enabled {
 		rate = c.Default
+	}
+	if l.live.key == "overall" {
+		if c.Overall >= 0 && c.Overall <= 1<<30 {
+			l.bytesPerSecond = c.Overall * 1024
+		}
+		return l.bytesPerSecond
 	}
 	if v, ok := c.Overrides[l.live.key]; ok && v > 0 && v <= 1<<30 && (rate == 0 || v < rate) {
 		rate = v

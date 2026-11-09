@@ -162,7 +162,7 @@ func resumeDownloadWithLimit(ctx context.Context, client *http.Client, destinati
 			return 0, errors.New("partial file identity differs from checkpoint")
 		}
 	}
-	if c.Version == 3 {
+	if c.parallel() {
 		return resumeChunks(ctx, client, path, partial, c, expectedSHA256, progress, connections)
 	}
 	hash := sha256.New()
@@ -236,6 +236,10 @@ func resumeDownloadWithLimit(ctx context.Context, client *http.Client, destinati
 		return 0, fmt.Errorf("seek partial file: %w", err)
 	}
 	tracker := &progressWriter{writer: io.MultiWriter(partial, hash), output: progress, total: *c.Total, written: c.Completed, startWritten: c.Completed, start: time.Now()}
+	segments := newSegmentSession(progress, "sequential", 1, []transferSegment{{Start: 0, End: *c.Total, Downloaded: c.Completed, State: "downloading"}})
+	complete := false
+	defer func() { segments.finish(ctx, complete) }()
+	tracker.segment, tracker.segments = segments.part(0), segments
 	tracker.checkpoint = checkpointProgress(path, partial, &c, hash, c.Completed)
 	tracker.report()
 	written, err := io.Copy(tracker, io.LimitReader(response.Body, *c.Total-c.Completed+1))
@@ -253,6 +257,8 @@ func resumeDownloadWithLimit(ctx context.Context, client *http.Client, destinati
 	if expectedSHA256 != "" && !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), expectedSHA256) {
 		return totalWritten, errors.New("SHA-256 mismatch; partial data kept")
 	}
+	tracker.segment.setState(segmentVerifying)
+	segments.publish()
 	if err := partial.Sync(); err != nil {
 		return totalWritten, fmt.Errorf("sync partial file: %w", err)
 	}
@@ -271,5 +277,6 @@ func resumeDownloadWithLimit(ctx context.Context, client *http.Client, destinati
 	if err := os.Remove(path); err != nil {
 		return totalWritten, fmt.Errorf("file completed, but checkpoint cleanup failed: %w", err)
 	}
+	complete = true
 	return totalWritten, nil
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"net/http"
 	"net/url"
@@ -72,7 +73,7 @@ func downloadFresh(ctx context.Context, client *http.Client, rawURL, destination
 	return downloadFreshNamed(ctx, client, rawURL, &destination, checksum, progress, connections, nil)
 }
 
-func downloadFreshNamed(ctx context.Context, client *http.Client, rawURL string, destinationPtr *string, checksum string, progress io.Writer, connections int, resolve func(http.Header)) (int64, error) {
+func downloadFreshNamed(ctx context.Context, client *http.Client, rawURL string, destinationPtr *string, checksum string, progress io.Writer, connections int, resolve func(http.Header) error) (int64, error) {
 	destination := *destinationPtr
 	if connections <= 1 || runtime.GOOS != "linux" {
 		return downloadNamed(ctx, client, rawURL, destinationPtr, checksum, progress, resolve)
@@ -111,7 +112,9 @@ func downloadFreshNamed(ctx context.Context, client *http.Client, rawURL string,
 		return downloadNamed(ctx, client, rawURL, destinationPtr, checksum, progress, resolve)
 	}
 	if resolve != nil {
-		resolve(rep.header)
+		if err := resolve(rep.header); err != nil {
+			return 0, err
+		}
 		destination = *destinationPtr
 		announceDestination(progress, destination)
 		for _, path := range []string{destination, destination + ".part"} {
@@ -124,8 +127,17 @@ func downloadFreshNamed(ctx context.Context, client *http.Client, rawURL string,
 }
 
 type rangeResult struct {
-	index int
-	err   error
+	index      int
+	downloaded int64
+	digest     string
+	err        error
+}
+
+type rangeCheckpoint struct {
+	index      int
+	downloaded int64
+	digest     string
+	done       chan error
 }
 
 func parallelDownload(ctx context.Context, client *http.Client, rawURL, destination, checksum string, progress io.Writer, workers int, rep representation) (int64, error) {
@@ -154,7 +166,7 @@ func parallelDownload(ctx context.Context, client *http.Client, rawURL, destinat
 	if err != nil {
 		return 0, fmt.Errorf("identify partial file: %w", err)
 	}
-	c := checkpoint{Version: 3, URL: rawURL, ResolvedURL: rep.url, Destination: absolute, Partial: absolute + ".part", ETag: rep.etag, Total: &rep.size, ExpectedSHA256: checksum, State: "downloading", PartialIdentity: identity, PartialToken: createPartialToken(partial)}
+	c := checkpoint{Version: 4, URL: rawURL, ResolvedURL: rep.url, Destination: absolute, Partial: absolute + ".part", ETag: rep.etag, Total: &rep.size, ExpectedSHA256: checksum, State: "downloading", PartialIdentity: identity, PartialToken: createPartialToken(partial)}
 	size := rep.size / int64(workers)
 	for i := 0; i < workers; i++ {
 		start := int64(i) * size
@@ -171,8 +183,13 @@ func parallelDownload(ctx context.Context, client *http.Client, rawURL, destinat
 }
 
 func chunkDigest(partial *os.File, chunk savedChunk) (string, error) {
+	chunk.Downloaded = chunk.End - chunk.Start
+	return chunkPrefixDigest(partial, chunk)
+}
+
+func chunkPrefixDigest(partial *os.File, chunk savedChunk) (string, error) {
 	hash := sha256.New()
-	if _, err := io.CopyN(hash, io.NewSectionReader(partial, chunk.Start, chunk.End-chunk.Start), chunk.End-chunk.Start); err != nil {
+	if _, err := io.CopyN(hash, io.NewSectionReader(partial, chunk.Start, chunk.savedLength()), chunk.savedLength()); err != nil {
 		return "", fmt.Errorf("hash chunk: %w", err)
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
@@ -183,12 +200,34 @@ func runChunks(ctx context.Context, client *http.Client, path string, partial *o
 	if connections < 1 || connections > 16 {
 		return c.Completed, errors.New("connections must be between 1 and 16")
 	}
+	// Older checkpoints only contain whole chunks. Upgrade their lengths while
+	// leaving unrecorded bytes outside the reusable prefix.
+	c.Version = 4
+	c.Chunks = append([]savedChunk(nil), c.Chunks...)
+	for i := range c.Chunks {
+		c.Chunks[i].Downloaded = c.Chunks[i].savedLength()
+	}
 	rep := representation{url: c.ResolvedURL, etag: c.ETag, size: *c.Total}
 	workerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	results := make(chan rangeResult, len(c.Chunks))
+	checkpoints := make(chan rangeCheckpoint)
 	var count atomic.Int64
 	count.Store(c.Completed)
+	ranges := make([]transferSegment, 0, len(c.Chunks))
+	for _, chunk := range c.Chunks {
+		part := transferSegment{Start: chunk.Start, End: chunk.End, Downloaded: chunk.savedLength(), State: "waiting"}
+		if chunk.SHA256 != "" {
+			part.State, part.Downloaded = "completed", chunk.End-chunk.Start
+		}
+		ranges = append(ranges, part)
+	}
+	segments := newSegmentSession(progress, "parallel", connections, ranges)
+	complete := false
+	defer func() { segments.finish(ctx, complete) }()
+	if progress != nil {
+		fmt.Fprintf(progress, "Downloaded %d/%d bytes (%.1f%%)\n", c.Completed, rep.size, float64(c.Completed)*100/float64(rep.size))
+	}
 	pending := 0
 	slots := make(chan struct{}, connections)
 	rawURL := c.URL
@@ -198,19 +237,38 @@ func runChunks(ctx context.Context, client *http.Client, path string, partial *o
 		}
 		pending++
 		i, chunk := i, chunk
+		part := segments.part(i)
 		go func() {
 			var err error
+			var downloaded int64
+			var digest string
+			report := func(n int64, sum string) error {
+				update := rangeCheckpoint{index: i, downloaded: n, digest: sum, done: make(chan error, 1)}
+				// The owner drains reports even after cancellation, so a clean
+				// pause can retain the last bytes written by every worker.
+				checkpoints <- update
+				return <-update.done
+			}
 			select {
 			case slots <- struct{}{}:
-				_, err = fetchRange(workerCtx, client, rawURL, partial, chunk.Start, chunk.End-1, rep, &count)
+				part.setState(segmentConnecting)
+				downloaded, digest, err = fetchRange(workerCtx, client, rawURL, partial, chunk, rep, &count, part, report)
+				if err == nil {
+					part.setState(segmentVerifying)
+				}
 				<-slots
 			case <-workerCtx.Done():
 				err = workerCtx.Err()
 			}
 			if err != nil {
+				if workerCtx.Err() != nil {
+					part.setState(segmentPaused)
+				} else {
+					part.setState(segmentFailed)
+				}
 				cancel()
 			}
-			results <- rangeResult{index: i, err: err}
+			results <- rangeResult{index: i, downloaded: downloaded, digest: digest, err: err}
 		}()
 	}
 	done := make(chan struct{})
@@ -223,6 +281,7 @@ func runChunks(ctx context.Context, client *http.Client, path string, partial *o
 			for {
 				select {
 				case <-ticker.C:
+					segments.publish()
 					n := count.Load()
 					fmt.Fprintf(progress, "Downloaded %d/%d bytes (%.1f%%)\n", n, rep.size, float64(n)*100/float64(rep.size))
 				case <-done:
@@ -232,32 +291,48 @@ func runChunks(ctx context.Context, client *http.Client, path string, partial *o
 		}()
 	}
 	var firstErr, checkpointErr error
-	for i := 0; i < pending; i++ {
-		result := <-results
-		if result.err != nil {
-			if firstErr == nil || (errors.Is(firstErr, context.Canceled) && !errors.Is(result.err, context.Canceled)) {
-				firstErr = result.err
-			}
-			cancel()
-			continue
-		}
+	persistRange := func(index int, n int64, digest string, complete bool) error {
 		if checkpointErr != nil {
-			continue
+			return checkpointErr
 		}
-		digest, err := chunkDigest(partial, c.Chunks[result.index])
-		if err == nil {
-			updated := c
-			updated.Chunks = append([]savedChunk(nil), c.Chunks...)
-			updated.Chunks[result.index].SHA256 = digest
-			updated.Completed += updated.Chunks[result.index].End - updated.Chunks[result.index].Start
-			err = saveCheckpoint(path, partial, updated)
-			if err == nil {
-				c = updated
-			}
+		old := c.Chunks[index]
+		if n <= old.savedLength() && !complete {
+			return nil
 		}
-		if err != nil {
-			checkpointErr = fmt.Errorf("save completed chunk: %w", err)
+		updated := c
+		updated.Chunks = append([]savedChunk(nil), c.Chunks...)
+		part := &updated.Chunks[index]
+		part.Downloaded = n
+		part.PrefixSHA256 = digest
+		if complete {
+			part.SHA256, part.PrefixSHA256 = digest, ""
+		}
+		updated.Completed += n - old.savedLength()
+		if err := saveCheckpoint(path, partial, updated); err != nil {
+			checkpointErr = fmt.Errorf("save chunk progress: %w", err)
 			cancel()
+			return checkpointErr
+		}
+		c = updated
+		return nil
+	}
+	for remaining := pending; remaining > 0; {
+		select {
+		case update := <-checkpoints:
+			update.done <- persistRange(update.index, update.downloaded, update.digest, false)
+		case result := <-results:
+			remaining--
+			if result.err != nil {
+				if firstErr == nil || (errors.Is(firstErr, context.Canceled) && !errors.Is(result.err, context.Canceled)) {
+					firstErr = result.err
+				}
+				cancel()
+				continue
+			}
+			if err := persistRange(result.index, result.downloaded, result.digest, true); err == nil {
+				segments.part(result.index).setState(segmentComplete)
+				segments.publish()
+			}
 		}
 	}
 	close(done)
@@ -304,6 +379,7 @@ func runChunks(ctx context.Context, client *http.Client, path string, partial *o
 	if progress != nil {
 		fmt.Fprintf(progress, "Downloaded %d/%d bytes (100.0%%)\n", rep.size, rep.size)
 	}
+	complete = true
 	return rep.size, nil
 }
 
@@ -312,11 +388,11 @@ func resumeChunks(ctx context.Context, client *http.Client, path string, partial
 		if err := ctx.Err(); err != nil {
 			return c.Completed, err
 		}
-		if chunk.SHA256 == "" {
+		if chunk.savedLength() == 0 {
 			continue
 		}
-		digest, err := chunkDigest(partial, chunk)
-		if err != nil || !strings.EqualFold(digest, chunk.SHA256) {
+		digest, err := chunkPrefixDigest(partial, chunk)
+		if err != nil || !strings.EqualFold(digest, chunk.savedDigest()) {
 			return c.Completed, errors.New("saved chunk does not match checkpoint")
 		}
 	}
@@ -337,10 +413,16 @@ func resumeChunks(ctx context.Context, client *http.Client, path string, partial
 	return runChunks(ctx, client, path, partial, c, checksum, progress, connections)
 }
 
-func fetchRange(ctx context.Context, client *http.Client, rawURL string, partial *os.File, start, end int64, rep representation, count *atomic.Int64) (int64, error) {
+func fetchRange(ctx context.Context, client *http.Client, rawURL string, partial *os.File, chunk savedChunk, rep representation, count *atomic.Int64, part *segmentPart, report func(int64, string) error) (int64, string, error) {
+	digest := sha256.New()
+	saved := chunk.savedLength()
+	if _, err := io.CopyN(digest, io.NewSectionReader(partial, chunk.Start, saved), saved); err != nil {
+		return saved, "", err
+	}
+	start, end := chunk.Start+saved, chunk.End-1
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return 0, err
+		return saved, "", err
 	}
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
 	req.Header.Set("If-Range", rep.etag)
@@ -351,42 +433,69 @@ func fetchRange(ctx context.Context, client *http.Client, rawURL string, partial
 		if errors.As(err, &u) {
 			err = u.Err
 		}
-		return 0, fmt.Errorf("request range: %w", err)
+		return saved, "", fmt.Errorf("request range: %w", err)
 	}
 	defer response.Body.Close()
 	if err := transientStatus(response); err != nil {
-		return 0, err
+		return saved, "", err
 	}
 	length := end - start + 1
 	if response.Request == nil || response.Request.URL == nil || response.Request.URL.String() != rep.url || response.StatusCode != http.StatusPartialContent || len(response.Header.Values("ETag")) != 1 || response.Header.Get("ETag") != rep.etag || len(response.Header.Values("Content-Range")) != 1 || response.Header.Get("Content-Range") != fmt.Sprintf("bytes %d-%d/%d", start, end, rep.size) || len(response.Header.Values("Content-Encoding")) > 1 || (response.Header.Get("Content-Encoding") != "" && !strings.EqualFold(response.Header.Get("Content-Encoding"), "identity")) || (response.ContentLength >= 0 && response.ContentLength != length) {
-		return 0, errors.New("range response does not match selected representation")
+		return saved, "", errors.New("range response does not match selected representation")
 	}
-	writer := &rangeWriter{out: io.NewOffsetWriter(partial, start), count: count}
-	n, err := io.CopyN(writer, response.Body, length)
+	part.setState(segmentDownloading)
+	writer := &rangeWriter{out: io.NewOffsetWriter(partial, start), count: count, part: part, digest: digest, written: saved, saved: saved, total: chunk.End - chunk.Start, last: time.Now(), report: report}
+	_, err = io.CopyN(writer, response.Body, length)
+	if saveErr := writer.savePrefix(); saveErr != nil {
+		err = errors.Join(err, saveErr)
+	}
 	if errors.Is(err, io.EOF) {
 		err = io.ErrUnexpectedEOF
 	}
 	if err != nil {
-		return n, fmt.Errorf("transfer range: %w", err)
+		return writer.written, hex.EncodeToString(digest.Sum(nil)), fmt.Errorf("transfer range: %w", err)
 	}
 	var extra [1]byte
 	m, err := io.ReadFull(response.Body, extra[:])
 	if m != 0 || err == nil {
-		return n, errors.New("range response exceeded its declared length")
+		return writer.written, hex.EncodeToString(digest.Sum(nil)), errors.New("range response exceeded its declared length")
 	}
 	if !errors.Is(err, io.EOF) {
-		return n, fmt.Errorf("finish range: %w", err)
+		return writer.written, hex.EncodeToString(digest.Sum(nil)), fmt.Errorf("finish range: %w", err)
 	}
-	return n, nil
+	return writer.written, hex.EncodeToString(digest.Sum(nil)), nil
 }
 
 type rangeWriter struct {
-	out   io.Writer
-	count *atomic.Int64
+	out                   io.Writer
+	count                 *atomic.Int64
+	part                  *segmentPart
+	digest                hash.Hash
+	written, saved, total int64
+	last                  time.Time
+	report                func(int64, string) error
 }
 
 func (w *rangeWriter) Write(p []byte) (int, error) {
 	n, err := w.out.Write(p)
 	w.count.Add(int64(n))
+	w.part.add(int64(n))
+	w.written += int64(n)
+	_, _ = w.digest.Write(p[:n])
+	if err == nil && (w.written-w.saved >= 1<<20 || time.Since(w.last) >= 2*time.Second) {
+		err = w.savePrefix()
+	}
 	return n, err
+}
+
+func (w *rangeWriter) savePrefix() error {
+	// Full ranges become reusable only after response EOF is validated.
+	if w.written <= w.saved || w.written >= w.total {
+		return nil
+	}
+	if err := w.report(w.written, hex.EncodeToString(w.digest.Sum(nil))); err != nil {
+		return err
+	}
+	w.saved, w.last = w.written, time.Now()
+	return nil
 }

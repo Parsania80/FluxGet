@@ -58,7 +58,7 @@ func assertSavedChunks(t *testing.T, path, dest string, payload []byte) checkpoi
 	if err != nil {
 		t.Fatalf("load last checkpoint: %v", err)
 	}
-	if c.Version != 3 {
+	if !c.parallel() {
 		t.Fatalf("checkpoint version: %d", c.Version)
 	}
 	partial, err := os.ReadFile(dest + ".part")
@@ -66,14 +66,15 @@ func assertSavedChunks(t *testing.T, path, dest string, payload []byte) checkpoi
 		t.Fatal(err)
 	}
 	for _, chunk := range c.Chunks {
-		if chunk.SHA256 == "" {
+		if chunk.savedLength() == 0 {
 			continue
 		}
-		if chunk.End > int64(len(partial)) || !bytes.Equal(partial[chunk.Start:chunk.End], payload[chunk.Start:chunk.End]) {
+		end := chunk.Start + chunk.savedLength()
+		if end > int64(len(partial)) || !bytes.Equal(partial[chunk.Start:end], payload[chunk.Start:end]) {
 			t.Fatal("checkpoint claims invalid bytes")
 		}
-		sum := sha256.Sum256(partial[chunk.Start:chunk.End])
-		if fmt.Sprintf("%x", sum) != chunk.SHA256 {
+		sum := sha256.Sum256(partial[chunk.Start : chunk.Start+chunk.savedLength()])
+		if fmt.Sprintf("%x", sum) != chunk.savedDigest() {
 			t.Fatal("saved chunk hash differs")
 		}
 	}

@@ -3,7 +3,7 @@
 A Go download manager focused on reliable file transfers, with multi-interface support planned for a later milestone.
 The long-term goal is an IDM-like download manager, starting with a reliable Linux download engine.
 
-**Status:** Early CLI and desktop prototypes. Sequential and parallel range downloads are implemented on Linux. The desktop app starts individual downloads through the CLI and displays its own download history; the first desktop preview has been reviewed by the operator. Native testing on other operating systems is still pending.
+**Status:** Early CLI and desktop prototypes. Sequential and parallel range downloads are implemented on Linux. The desktop now presents one Downloads list backed by the persistent CLI scheduler, with automatic scheduling, Download now/later, and shared settings. Interactive review of this redesigned preview and native testing on other operating systems remain pending.
 
 Hosted CI passed formatting, vet, race tests, the desktop build, and Linux/Windows/macOS builds for commit `98a4fbe`. A local Linux/amd64 build has downloaded and verified a real 30.9 MB file over the internet to ext4; see the roadmap for the test's limits.
 The queue enforces an active-download limit; downloads also use bounded timeouts and retries. Other planned resource limits are documented in the roadmap.
@@ -11,7 +11,7 @@ An active-download limit concerns simultaneous transfers, not the number of file
 The queue defaults to five simultaneous downloads and supports a configurable limit, including ten. Eligible new downloads use up to four connections by default.
 The planned recovery behavior preserves partial files by default and requires an explicit resume after restarting the application.
 The CLI can list saved jobs, resume a known output path, and manage a persistent queue. Transfers do not start automatically when the queue is opened.
-On Linux, interrupted downloads with a strong ETag can resume using validated ranges. Without a strong validator, sequential recovery can verify the saved prefix against a single fresh, known-length response before appending. Parallel checkpoints record each fully verified chunk independently.
+On Linux, interrupted downloads with a strong ETag can resume using validated ranges. Without a strong validator, sequential recovery can verify the saved prefix against a single fresh, known-length response before appending. Parallel checkpoints record verified progress within every part, so unfinished parts can resume from saved offsets.
 Phase 0 decisions include the license, supported platforms, and resource limits.
 Linux tests cover full-disk and permission failures, repeated queue process crashes and retries, checkpoint-replacement failures, and final-publication process crashes; other platforms and power loss still need verification.
 Go 1.26.8 is installed for the current Linux user under `~/.local/share/go1.26.8`, with commands in `~/.local/bin`.
@@ -120,9 +120,9 @@ To resume an eligible interrupted download from the same output path:
 go run . -resume -out "go-releases.json"
 ```
 
-Linux checkpoints are stored in the FluxGet jobs directory under the user configuration directory and contain the source URL. Do not use secret-bearing URLs. Resume checks the saved partial file. When a strong ETag is available, it validates the resolved URL and range responses. Otherwise, it downloads the saved prefix again, verifies its SHA-256 against the local checkpoint, and only then appends the remaining bytes from the same known-length response. This fallback consumes bandwidth for the prefix and cannot authenticate a file without a trusted checksum. Parallel recovery requires a strong ETag and verifies each completed chunk. If checks fail, the partial file is kept and no final file is published.
+Linux checkpoints are stored in the FluxGet jobs directory under the user configuration directory and contain the source URL. Do not use secret-bearing URLs. Resume checks the saved partial file. When a strong ETag is available, it validates the resolved URL and range responses. Otherwise, it downloads the saved prefix again, verifies its SHA-256 against the local checkpoint, and only then appends the remaining bytes from the same known-length response. This fallback consumes bandwidth for the prefix and cannot authenticate a file without a trusted checksum. Parallel recovery requires a strong ETag and verifies each saved part prefix before requesting its remaining range. Prefixes are checkpointed after about 1 MiB of new data or two seconds when data arrives, and on a clean pause. A crash can lose data since the last checkpoint. New parallel checkpoints use version 4; versions 1–3 remain readable, but older executables cannot read version 4. Older unfinished ranges without recorded prefix hashes must be downloaded again once; unrecorded bytes cannot be recovered retroactively. If checks fail, the partial file is kept and no final file is published.
 
-For example, `-speed-limit 512` limits a standalone download to approximately 512 KiB/s across its connections. With `-queue`, the same limit is shared by all active queue downloads. In the desktop Settings tab, enable a persistent default ceiling for each download. Use the **Limit** button beside a download to set its separate ceiling, including while it is running; 0 removes that individual ceiling. When both are enabled, the lower ceiling applies. The Queue tab also has a separate shared queue-wide limit set before opening the queue; the row limit can be changed while a queued transfer runs. Network and OS buffering can cause short bursts.
+For example, `-speed-limit 512` limits a standalone download to approximately 512 KiB/s across its connections. With `-queue`, the same limit is shared by all active queue downloads. Desktop Settings includes a default ceiling for each download and a separate overall ceiling across desktop downloads. Use the **Limit** button beside a download to set its individual ceiling, including while it is running; the visible **Remove limit** button removes that individual ceiling in one click. You can also turn off **Use custom speed limit** in the editor and choose **Apply**. The lower per-download ceiling applies, together with the shared overall ceiling. Desktop speed changes apply during transfers. Network and OS buffering can cause short bursts.
 
 Downloads and queue jobs retry selected temporary failures up to three times after the initial attempt, waiting 1, 2, and 4 seconds. HTTP 408, 429, 500, 502, 503, and 504 can be retried; a valid `Retry-After` of up to one minute is respected, and longer waits stop automatic retries. Connection and TLS handshake timeouts are 10 seconds, response headers have 30 seconds, and a stalled body read has 60 seconds. A transfer can run longer as long as it keeps receiving data. If saved bytes cannot be resumed safely, retries stop and preserve the partial file.
 
@@ -165,6 +165,8 @@ The checksum verifies that the archive matches a trusted copy of the checksum; i
 
 The desktop app uses Fyne and the existing CLI. Install Go, GCC, and the Linux graphics development libraries listed in the [Fyne setup guide](https://docs.fyne.io/started/quick/), then build both programs into the same directory:
 
+On the current Ubuntu machine, a user-local preview is installed under `~/.local/opt/fluxget` and can be opened from the applications menu as **FluxGet**. The desktop executable and CLI must remain together.
+
 ```bash
 mkdir -p dist
 go build -o dist/fluxget .
@@ -174,11 +176,21 @@ go build -o dist/fluxget .
 
 Paste a link and optionally choose a folder and filename. The window shows download history and progress; select a paused or interrupted download to resume it when the server supports safe recovery. Existing files offer **Keep existing file**, **Save another copy**, or **Replace existing file**. Replacement downloads a separate copy first and checks that the original has not changed before replacing it. The CLI executable must remain beside `fluxget-gui`.
 
-The Downloads tab has an action toolbar, an all/unfinished/finished filter, and a download list. Each download row shows its own progress line when its total size is known. Choose **Add URL** to enter a link and optional destination and filename. Use the **Limit** button beside a row to change its speed, including while it is running. The Downloads tab runs one standalone download at a time. It discovers interrupted standalone CLI checkpoints, including checkpoints from the earlier desktop prototype, but older completed downloads made outside this desktop history are not automatically listed. Desktop history stores URLs under the user configuration directory, so do not use secret-bearing links.
+The Downloads tab has one list with All downloads, Downloading, Waiting, Paused, Completed, and Failed filters. Choose **Add download**, enter a link and optional folder/filename, then choose **Download now** or **Download later**. Download now starts automatically when a slot is free; extra downloads show Waiting. Download later stays paused until you select it and choose Resume. Known-size rows show their own progress; active rows show speed and an approximate remaining time when those values are available. Unknown totals have no invented percentage. Use the row's **Limit** button to change its speed. A custom limit also shows a **Remove limit** button beside it; click it to return immediately to the Settings limits. In the editor, **Use custom speed limit** turns the custom ceiling on or off, and **Apply** saves the change. You do not need to enter 0. The default per-download and shared overall ceilings still apply after removing a custom limit.
 
-The Queue tab uses the same persistent queue as `-queue`. Choose the simultaneous-download limit, open the queue, add jobs, and select **Start queue**; select a job to pause, resume, cancel, retry, or remove it from the queue. Removing a job keeps its files. **Import saved download** accepts the full output path of an existing checkpoint. Closing the queue or window pauses active queue jobs. Previously active jobs reopen paused and require an explicit resume. Only one desktop or CLI queue can own the queue at a time.
+Download progress and the separate **Speed** label use **MB** and **MB/s** by default. Change **Settings → Display → Data unit** to **KB**, **MB**, or **GB**, then choose **Save settings**. The choice is remembered and also applies to speed-limit controls. These are decimal units: 1 MB is 1,000 KB, and 1 GB is 1,000 MB. Changing units preserves existing speed limits; new fractional limits are rounded down to the engine's supported precision. Small values keep extra decimal places instead of disappearing as zero.
 
-Queue jobs need a destination before they start. If the full path is left empty, FluxGet uses the original URL filename in the configured Downloads folder (or `download` when no filename is available); server-provided filenames are not used for queued jobs. Queue jobs refuse existing destinations and partial files; choose another path if needed. The standalone Downloads tab retains its separate duplicate-file choices. The queue's active-download limit does not include a simultaneous standalone download.
+Speed measures recent progress for that download, combining its parallel connections and excluding bytes saved before a resume. Measurements normally update about once per second; after 2.5 seconds without new progress, the speed shows zero. Paused, waiting, and completed rows show a dash. Remaining-time estimates use this recent speed.
+
+Each download also shows separate progress bars for its actual file parts, with Connecting, Downloading, Verifying, and Complete states. Four connections is the default maximum; eligible parallel transfers normally have four parts, while small files or servers without usable range support show one. Choose **Parts…** for live received amounts and file ranges in your selected unit. Saved parallel parts keep their original boundaries after reopening, even if you reduce the connection limit. Saved data within unfinished parts is verified on resume and reused from its recorded offset. Older completed history has no saved part details. Part-bar percentages currently omit fractions: 0% can mean some data has arrived but the part is still below 1%. Parts can advance at different speeds; use Parts… to check received amounts.
+
+Select a download to Pause, Resume, Retry, Open file, or Show in folder. More contains Cancel (keep files), Remove from history, and the separate confirmed Delete saved partial data action. Removal keeps files, while partial deletion uses the engine's ownership checks. The desktop starts its scheduler automatically; there is no separate Queue tab or manual Open/Start step. Closing the window waits for active transfers to stop safely. On reopening, previously active and waiting jobs are paused until explicitly resumed.
+
+Settings holds the simultaneous-download limit, connections per download, default folder, and speed limits. All desktop downloads share the same active-download limit. Lowering the limit lets current transfers finish before starting additional ones; connection changes apply to subsequent transfers. An existing CLI queue must be closed before the desktop can own the scheduler; FluxGet reports this conflict rather than starting another owner.
+
+Automatic desktop filenames use a safe name from the actual server response or range probe, with the URL name as fallback. Explicit names take precedence. If a server-selected name conflicts, the failed row explains the problem and offers the same Keep existing file, Save another copy, and Replace existing file choices. Destination reservations and exclusive file creation protect other jobs and existing files.
+
+The first unified startup backs up existing metadata as `queue.json.before-unified`, `desktop-history.json.before-unified`, and `desktop-speed.json.before-unified` beside the originals when present. Eligible legacy history and discovered standalone checkpoints join the same scheduler paused; completed history and individual speed limits are preserved. Entries that cannot be imported remain visible without changing their files. Queue metadata is now version 2; this version reads version-one queues, but older executables cannot read the upgraded format. Desktop history and queue metadata contain URLs, so do not use secret-bearing links. Completed downloads made outside FluxGet's stored history are not automatically discovered.
 
 On Linux or macOS:
 
@@ -275,17 +287,21 @@ Repeatable local single-download and queue experiments are documented in [BENCHM
 ## Current limitations
 
 - No extended recovery retry window yet. Recovery and verified partial-file cleanup are limited to eligible Linux checkpoints.
-- A crash between creating the partial file and saving the initial job record can leave an undiscovered partial file. Parallel recovery may redownload work in an unfinished chunk. Power-loss recovery is not guaranteed.
+- A crash between creating the partial file and saving the initial job record can leave an undiscovered partial file. Parallel recovery may redownload bytes received since the last successful prefix checkpoint; clean pauses save unfinished prefixes before stopping. Old checkpoints cannot reuse prefixes they never recorded. Power-loss recovery is not guaranteed.
 - Final-publication recovery requires an explicit `-resume`; legacy checkpoints without a completed-publication record require manual inspection.
 - No simultaneous network-interface use yet.
-- The desktop queue currently uses URL-derived filenames and does not offer the standalone download's duplicate-file choices. Browser integration is not yet available. Resuming requires a usable checkpoint and server support.
-- Progress updates occur when data is written, so a stalled connection does not produce regular updates.
+- The unified desktop still needs interactive acceptance testing on the operator's machine. Browser integration is not yet available. Resuming requires a usable checkpoint and server support.
+- CLI progress updates occur when data is written; desktop part counters are sampled regularly, including when a connection stalls.
 - Public direct URLs are the intended input; credential-bearing links and authenticated website workflows are outside the current scope.
 - Final publication requires hard-link support. Power-loss recovery is not guaranteed.
 
 ## Roadmap
 
-See [project.md](project.md) for the full plan. Desktop development now proceeds alongside the CLI; multi-interface downloading remains a separate experimental milestone.
+See [project.md](project.md) for the full plan. The unified Downloads redesign, real part progress, unfinished-part resume, and explicit custom-limit removal are implemented and covered by automated tests. Remaining interactive acceptance and v0.1 release checks stay open.
+
+Browser integration is planned for Chrome, Firefox, and Opera through optional extensions and a local native-messaging host. The plan includes a master switch, separate browser controls, and browser fallback for unsupported downloads. It starts with public direct downloads; authenticated and page-generated downloads need later support. Browser capture is not implemented yet.
+
+Continue interactive Linux testing and the remaining v0.1 release checks, including release-environment verification and broader resource-bound testing, alongside these usability improvements. Multi-interface downloading remains a later experimental milestone.
 
 ## License
 

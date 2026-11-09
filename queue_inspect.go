@@ -46,7 +46,7 @@ func inspectQueueJob(output io.Writer, j queueJob) {
 		total = fmt.Sprint(*c.Total)
 	}
 	fmt.Fprintf(output, "Saved: %d/%s bytes", c.Completed, total)
-	if c.Version == 3 {
+	if c.parallel() {
 		done := 0
 		for _, chunk := range c.Chunks {
 			if chunk.SHA256 != "" {

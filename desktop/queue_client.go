@@ -2,16 +2,22 @@ package main
 
 import (
 	"bufio"
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os/exec"
 	"strings"
+	"sync"
 )
 
 type queueClient struct {
 	commands chan string
 	done     chan struct{}
+	mu       sync.Mutex
+	next     int
+	pending  map[int]chan desktopResponse
 }
 
 func startQueue(executable string, maxActive int, speedLimit int64, update func(string), stopped func(error)) (*queueClient, error) {
@@ -19,7 +25,12 @@ func startQueue(executable string, maxActive int, speedLimit int64, update func(
 }
 
 func startQueueWithSettings(executable string, maxActive int, speedLimit int64, settingsPath string, update func(string), stopped func(error)) (*queueClient, error) {
+	return startConfiguredQueue(executable, maxActive, 4, speedLimit, settingsPath, update, stopped)
+}
+
+func startConfiguredQueue(executable string, maxActive, connections int, speedLimit int64, settingsPath string, update func(string), stopped func(error)) (*queueClient, error) {
 	args := []string{"-queue", "-max-active", fmt.Sprint(maxActive), "-speed-limit", fmt.Sprint(speedLimit)}
+	args = append(args, "-connections", fmt.Sprint(connections))
 	if settingsPath != "" {
 		args = append(args, "-live-speed-file", settingsPath)
 	}
@@ -36,7 +47,7 @@ func startQueueWithSettings(executable string, maxActive int, speedLimit int64, 
 		writer.Close()
 		return nil, err
 	}
-	client := &queueClient{commands: make(chan string, 64), done: make(chan struct{})}
+	client := &queueClient{commands: make(chan string, 64), done: make(chan struct{}), pending: make(map[int]chan desktopResponse)}
 	go func() {
 		for {
 			select {
@@ -55,7 +66,19 @@ func startQueueWithSettings(executable string, maxActive int, speedLimit int64, 
 		scanner := bufio.NewScanner(reader)
 		scanner.Buffer(make([]byte, 4096), 2<<20)
 		for scanner.Scan() {
-			update(scanner.Text())
+			line := scanner.Text()
+			if strings.HasPrefix(line, "DESKTOP_JSON ") {
+				var response desktopResponse
+				if json.Unmarshal([]byte(strings.TrimPrefix(line, "DESKTOP_JSON ")), &response) == nil {
+					client.mu.Lock()
+					if target := client.pending[response.ID]; target != nil {
+						target <- response
+					}
+					client.mu.Unlock()
+				}
+			} else {
+				update(line)
+			}
 		}
 		if err := scanner.Err(); err != nil {
 			reader.CloseWithError(err)
@@ -71,6 +94,50 @@ func startQueueWithSettings(executable string, maxActive int, speedLimit int64, 
 		stopped(err)
 	}()
 	return client, nil
+}
+
+type desktopRequest struct {
+	ID          int        `json:"id"`
+	Operation   string     `json:"operation"`
+	Job         queueEntry `json:"job"`
+	MaxActive   int        `json:"max_active"`
+	Connections int        `json:"connections"`
+}
+
+type desktopResponse struct {
+	Revision uint64       `json:"revision"`
+	ID       int          `json:"id"`
+	JobID    int          `json:"job_id"`
+	Jobs     []queueEntry `json:"jobs"`
+	Error    string       `json:"error"`
+}
+
+func (q *queueClient) request(ctx context.Context, request desktopRequest) (desktopResponse, error) {
+	q.mu.Lock()
+	q.next++
+	request.ID = q.next
+	target := make(chan desktopResponse, 1)
+	q.pending[request.ID] = target
+	q.mu.Unlock()
+	defer func() { q.mu.Lock(); delete(q.pending, request.ID); q.mu.Unlock() }()
+	data, err := json.Marshal(request)
+	if err != nil {
+		return desktopResponse{}, err
+	}
+	if err := q.send("desktop-json " + string(data)); err != nil {
+		return desktopResponse{}, err
+	}
+	select {
+	case response := <-target:
+		if response.Error != "" {
+			return response, errors.New(response.Error)
+		}
+		return response, nil
+	case <-ctx.Done():
+		return desktopResponse{}, ctx.Err()
+	case <-q.done:
+		return desktopResponse{}, errors.New("downloads service is unavailable; close any other FluxGet CLI queue and try again")
+	}
 }
 
 func (q *queueClient) send(command string) error {

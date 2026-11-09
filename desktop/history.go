@@ -16,6 +16,8 @@ type job struct {
 	Message  string       `json:"message,omitempty"`
 	Progress *float64     `json:"progress,omitempty"`
 	Replace  *replacement `json:"replace,omitempty"`
+	QueueID  int          `json:"queue_id,omitempty"`
+	Archived bool         `json:"archived,omitempty"`
 }
 
 type replacement struct {

@@ -2,11 +2,11 @@
 
 A Go download manager inspired by IDM, with reliable transfers first and multi-interface downloading as a later distinguishing feature.
 
-**Status:** First sequential-download implementation written. The operator reports one successful live download of 22,898 bytes. Formatting, automated tests, race checks, and vetting passed on Linux with Go 1.26.8 on 2026-11-02; broader platform verification remains pending. Other roadmap features remain planned.
+**Status (2026-11-09):** Linux CLI and Fyne desktop prototypes implement sequential and parallel transfers, persistence, recovery, queue management, progress, and live speed limits. The unified Downloads redesign is implemented in the working tree and installed as the local preview: one list, automatic scheduling, Download now/later, shared settings, and legacy history migration. CLI/desktop race tests, vet, Linux builds, CLI cross-builds, and rendered UI checks passed. Interactive operator acceptance and remaining v0.1 release checks are open. Optional Chrome, Firefox, and Opera integration follows the desktop acceptance gate; browser integration is planned, not implemented.
 
 **Project purpose:** Learn Go through implementation and publish a GitHub project that demonstrates backend and systems engineering: concurrency, networking, persistence, recovery, testing, and clear architecture.
 
-**How to use this roadmap:** Complete phases in order. Check a task only when code, tests, or documentation demonstrate its completion. Resolve open decisions before implementing the affected feature. Update this file with small, reviewable edits as the project develops.
+**How to use this roadmap:** Follow dependencies and the current priorities in section 18. Engine phases retain their reliability gates; desktop and browser work can proceed alongside release verification. Check a task only when code, tests, or documentation demonstrate its completion. Resolve open decisions before implementing the affected feature. Update this file with small, reviewable edits as the project develops. Older unchecked engine tasks require an evidence review before marking them complete; an unchecked item does not necessarily mean no implementation exists.
 
 **Learning workflow:** Use VibeWise Learn while developing. The learner proposes and reasons through meaningful design choices; the assistant explains concepts, gives feedback, and writes the agreed implementation. Local learning notes live in .vibe-wise/. Roadmap proposals are not confirmed architecture decisions.
 
@@ -18,6 +18,8 @@ The long-term product goal is to approach IDM's practical download-management ca
 The long-term target is Windows, macOS, and Linux. Development may move between Linux and Windows using one shared Go codebase. Platform-specific features belong in small adapters.
 
 The first release is **v0.1: Reliable Download Engine**, targeting Linux/amd64 first. Desktop development now proceeds alongside the CLI. Keep shared behavior portable so ARM64, Windows, and macOS can be tested and supported later.
+
+**Product direction (2026-11-09):** Present one understandable Downloads list, with scheduling handled automatically. Let users opt into sending supported browser downloads to FluxGet and enable or disable Chrome, Firefox, and Opera independently. Aim for the familiar IDM interaction on supported downloads; do not promise identical behavior on every website or download type.
 
 ### First demonstration
 
@@ -40,17 +42,18 @@ The application is local software. A hosted server, user accounts, PostgreSQL cl
 - Successful output is published through a same-directory hard link, then the partial name is removed. Existing destinations and partial files are refused. Filesystems without hard-link support fail safely with the partial file retained; no portable rename-overwrite guarantee is assumed.
 - Automated tests cover binary and empty files, unknown length, redirects and TLS, progress, checksums, HTTP errors, truncated responses, partial writes, disk-full and permission failures, checkpoint update failure and recovery, existing files, destination-creation races, and cancellation. They pass on Linux with Go 1.26.8.
 - Eligible Linux sequential transfers save versioned JSON checkpoints during transfer and on interruption. The `-resume` command locks the job and partial file, verifies the saved prefix and remote representation, and validates the actual resumed response before writing.
-- The `-list` command discovers saved Linux jobs without changing them. Version-two records persist sequential states; version-three records track independent parallel chunks, and version-one checkpoints remain readable. Live locks distinguish active work from interrupted records. Completed standalone jobs are removed from the saved-job listing; completed queue jobs remain in the queue history.
+- The `-list` command discovers saved Linux jobs without changing them. Version-two records persist sequential states; version-four records track saved offsets and SHA-256 prefix hashes within independent parallel chunks. Versions one through three remain readable; older parallel checkpoints upgrade on resumed work without trusting unrecorded prefixes. Live locks distinguish active work from interrupted records. Completed standalone jobs are removed from the saved-job listing; completed queue jobs remain in the queue history.
 - An interactive Linux queue persists queued, running, paused, failed, completed, and canceled jobs in an atomically replaced JSON file under an exclusive lock. It schedules up to five active downloads by default (configurable from 1 to 64), imports existing checkpoints, and restores previously active jobs paused. The queue loop owns lifecycle changes; workers report results to it.
-- On Linux, new downloads of at least 1 MiB use up to four range workers by default (configurable from 1 to 16 per CLI or queue session) after a successful strong-ETag range probe. Each response is validated before offset writes; unsupported servers fall back to sequential. Completed chunks are hashed, synchronized, and checkpointed independently. Recovery validates each saved chunk and the remote representation, then downloads missing ranges with the configured connection limit.
+- On Linux, new downloads of at least 1 MiB use up to four range workers by default (configurable from 1 to 16 per CLI or queue session) after a successful strong-ETag range probe. Each response is validated before offset writes; unsupported servers fall back to sequential. Each worker maintains a streaming SHA-256 digest and sends bounded prefix checkpoints to the transfer owner after about 1 MiB or two seconds when receiving data, plus a final prefix on interruption. The owner synchronizes data and atomically publishes metadata before acknowledging a checkpoint. Recovery validates each saved prefix and the remote representation, then requests each remaining suffix with the configured connection limit. Only a range with validated response completion is marked complete; final publication still verifies the whole file.
 - Queue workers send bounded, nonblocking live progress updates to the queue loop; `inspect ID` reports local checkpoint status and recovery guidance without contacting the server. Progress updates can be dropped when the display is busy.
+- Desktop downloads expose actual per-range counters and states through runtime-only snapshots, with independent part progress bars and a live details dialog. Sequential fallback shows one part. Reopened transfers restore the real checkpoint layout; saved ranges retain their boundaries independently of the current connection limit. Runtime received counts do not replace verified recovery checkpoints.
 - Queue `restart ID` and `discard ID` explicitly remove verified partials under job ownership; cleanup intent is persisted before deletion so the same command can finish after interruption. New partials record a Linux inode identity and random user extended-attribute marker; older or unmarked files are not deleted automatically. Expected checksums survive fresh restart.
 - Standalone and queue downloads use connect, TLS, response-header, and body-read inactivity timeouts. Selected transient HTTP and network failures get up to three cancellable retries; a valid Retry-After up to one minute is honored, and a longer value stops automatic retries. Partial data is retried only through validated resume.
 - Linux parallel storage tests exercise real data and checkpoint ENOSPC and permission errors during fresh transfers and recovery. They check saved chunks and retry successfully after restoring space or permissions, including through the queue.
 - Queue integration tests kill and restart the queue twice while chunks are saved out of order, inject transient probe and range failures, and verify saved chunks, limits, explicit restart, and backoff cancellation.
 - Linux process-kill tests cover checkpoint data write, sync and publication, plus the points before and after final linking and partial-file removal. A completed-publication checkpoint allows explicit `-resume` to verify and reconcile these final-publication states without overwriting conflicting files.
 - Resume uses validated ranges with a strong ETag, or verifies the saved prefix again against a single known-length response when no strong validator is available. The latter rereads the prefix and does not authenticate content without a trusted checksum. Recovery-window retries and additional platform verification remain future steps.
-- README.md documents the actual prototype, usage, verification commands, and limitations. Local Git metadata now contains commit 195d06bef804. Remote publication has not been verified. The current .gitignore covers debugger binaries and the default debug download.
+- README.md documents the actual prototype, usage, verification commands, and limitations. Local HEAD and the remote main branch matched commit `12635b4` when checked on 2026-11-09. The current .gitignore covers generated binaries and test downloads. Release publication remains separate from source publication.
 - .vscode/launch.json adds an optional Go/Delve launch profile that prompts for a URL and destination. README.md includes breakpoint and stepping instructions. Debugger binaries and the default debug download are ignored; a live debugger session remains unverified.
 
 ## 2. Terms used in this document
@@ -76,10 +79,11 @@ A downloaded byte count is not proof of a correct file. A server validator is no
 | v0.1 | Reliable engine, CLI, queue, parallel ranges, conditional resume, recovery, checksums, and resource limits | Automated failure tests and native release smoke tests on the supported OS/architecture combinations |
 | v0.2 | Experimental multi-interface support on one selected OS | Measured transfers and failover across real independent network paths |
 | v0.3 | Multi-interface support extended to the other target operating systems | A documented capability matrix and real platform tests |
-| Parallel track | Desktop GUI | Fyne prototype uses the existing CLI; evolve shared engine access and queue controls incrementally |
-| Later | Browser integration and adaptive network scheduling | Separate feature plans built around the existing engine |
+| Parallel track: desktop usability | One Downloads view with automatic scheduling and consistent controls | Migration preserves existing jobs, history, checkpoints, and speed settings; interactive Linux acceptance passes |
+| Parallel track: browser integration | Optional Chrome, Firefox, and Opera extensions plus a local native-messaging host | Manual handoff first, then tested automatic capture of supported public downloads with per-browser settings and browser fallback |
+| Later | Authenticated browser downloads and adaptive network scheduling | Separate designs for credentials, request replay, and routing; no automatic expansion of public-download support |
 
-Release labels express order, not fixed dates. Estimate implementation effort after the initial decisions and sequential download prototype.
+Release labels express order, not fixed dates. Desktop usability and browser integration are now prioritized before multi-interface development, without expanding the v0.1 engine release requirements. Browser integration receives its own release gate after the unified Downloads foundation is ready.
 
 The first release targets Linux/amd64; ARM64, Windows, and macOS support requires later native testing. Cross-platform download support does not imply cross-platform multi-interface support. Report exactly which capabilities have been verified on each platform.
 
@@ -113,7 +117,7 @@ The first CLI is one running application managing its queue. It must support add
 - Automatic application updates, cloud synchronization, and remote administration.
 - Calendar scheduling, mirror discovery, and automatic bandwidth optimization.
 
-These are deferred features. Do not claim complete IDM feature parity or guaranteed download acceleration.
+These are outside the v0.1 engine release. Desktop work is already underway and browser integration is a planned parallel milestone; neither is required to declare the engine release complete. Authenticated capture and other advanced browser cases remain deferred. Do not claim complete IDM feature parity or guaranteed download acceleration.
 
 ## 5. Architecture
 
@@ -136,7 +140,30 @@ Platform adapters
 Remote HTTP/HTTPS servers <---- transfer workers
 ```
 
-The Fyne desktop app is a separate Go module and starts the existing CLI as a companion process. Its Queue tab connects to the same exclusively owned persistent CLI queue; the separate Downloads tab uses standalone transfers. The CLI remains the sole owner of transfer, checkpoint, and queue behavior; a future shared engine package can replace the process boundary when needed. Desktop speed settings are persisted in a private JSON file that companion processes read during transfers; the default applies per download, individual ceilings may be lower, and the separate queue-wide cap remains available.
+The Fyne desktop app is a separate Go module and starts the CLI as a companion process. Its unified Downloads view connects automatically to one exclusively owned persistent scheduler. New desktop jobs use structured requests; the queue loop owns state changes, filename reservations, progress snapshots, and configuration updates. On desktop startup, restored active/waiting work becomes paused; new Download now jobs schedule automatically. The standalone CLI remains available separately. Desktop settings use a private JSON file read during transfers for per-download, individual, and shared overall speed ceilings.
+
+Queue schema version 2 adds optional filename-selection, output-path, progress, and diagnostic fields while retaining version-one reads. Existing queue/history/settings metadata is backed up before migration. Legacy desktop history maps to stable queue IDs, retaining replacement intents and speed ceilings; unimportable records remain visible. Transfer/checkpoint logic stays in the CLI. A completed replacement retains its transfer destination identity and records its final output path separately. Interactive acceptance remains required before closing the desktop milestone.
+
+**Planned desktop and browser architecture:** Route new desktop and browser jobs into the same persistent scheduler and Downloads view. A browser extension talks over native messaging to a small Go host, which starts or contacts the single desktop/queue owner through a private local IPC channel. On Linux, use a user-owned Unix socket with restrictive permissions and peer-identity checks; other platforms need verified adapters. Native hosts must not start competing queue owners or bypass job locks. The desktop owns job state and integration policy; the extension owns browser-side download operations. No public HTTP listener or hosted service is required. Existing standalone CLI behavior remains available.
+
+```text
+Chrome / Firefox / Opera extension
+    -> native messaging (browser-managed stdio)
+    -> Go host -> private local IPC -> single desktop/scheduler owner
+                                         -> existing transfer/checkpoint logic
+```
+
+### Tech Stack Lock
+
+| Area | Allowed technology | Boundary |
+| --- | --- | --- |
+| Engine and CLI | Go 1.26 baseline, Go standard library | Retain existing portable engine code and platform adapters |
+| Desktop | Go, pinned Fyne v2 dependencies in desktop/go.mod and desktop/go.sum | No new UI framework for this redesign |
+| Persistence | Versioned local JSON, current checkpoint and queue formats | Migrate safely; no database introduced for browser capture |
+| Browser extensions (planned) | Plain JavaScript, HTML, CSS, JSON, official WebExtensions APIs | Manifest V3 where supported, browser-specific manifests/background adapters; no framework or third-party runtime initially |
+| Native bridge (planned) | Go standard library, native messaging, platform-specific local IPC | Browser-specific host registration and explicit extension-ID allowlists |
+
+New dependencies require a documented need and comparison before adoption. Browser source directories such as `extensions/` and a native-host command location are proposed; finalize their placement during the bridge design without prematurely restructuring the engine.
 
 ### Responsibilities
 
@@ -228,7 +255,7 @@ Go offers offset-based writes through [File.WriteAt](https://pkg.go.dev/os#File.
 - [x] Use Linux as the primary development OS while keeping shared code portable for Windows and macOS.
 - [ ] Finalize CLI interaction, startup recovery, pause, cancel, retry, and overwrite behavior.
 - [x] Select versioned JSON job metadata and define checkpoint update ordering; implement and test the design during persistence work.
-- [ ] Define the full job lifecycle and the owner of each mutable state field. Version-two checkpoints persist sequential states and version-three checkpoints persist parallel chunks; the queue loop owns the basic persisted queue states, while additional lifecycle details remain open.
+- [ ] Define the full job lifecycle and the owner of each mutable state field. Version-two checkpoints persist sequential states and version-four checkpoints persist parallel chunks and unfinished-prefix offsets/hashes; the queue loop owns the basic persisted queue states, while additional lifecycle details remain open.
 - [ ] Set initial active-job, worker, buffer, timeout, and retry limits; implement and test the chosen concurrency controls and resolve the remaining proposed values in the relevant phases.
 - [ ] Define redirect, unsupported-validator, and unsupported-range policies. Reject HTTPS-to-HTTP redirects; the current prototype allows up to nine redirects. Unsupported-validator and unsupported-range details remain open.
 - [ ] Record application-crash guarantees and exclusions.
@@ -280,7 +307,7 @@ These are v0.1 design decisions. The Linux queue implements explicit fresh resta
 | Action | Intended behavior |
 | --- | --- |
 | Pause | Stop scheduling work for the job, cancel active requests, wait for writers to finish, then save a consistent checkpoint. Show paused only after this succeeds; report checkpoint failures without claiming a safe pause. Preserve the partial file. |
-| Resume | Revalidate the remote representation and local partial file before reusing saved bytes. Queue the job subject to concurrency limits. Resume only with supported ranges and a suitable strong validator; otherwise explain that a fresh download is needed. |
+| Resume | Revalidate the remote representation and local partial file before reusing saved bytes. Queue the job subject to concurrency limits. Parallel recovery requires a strong ETag and validated ranges; sequential recovery can instead verify the saved prefix against one fresh known-length response. If neither path is safe, explain that a fresh download is needed. |
 | Cancel | Stop requests and wait for writers. Keep the partial file by default; provide an explicit option to remove it. Remove only partial data known to belong to the job, never an existing final destination. A canceled job is not automatically resumed. |
 | Restart application | Reload saved jobs without automatically starting transfers. Restore jobs interrupted while active as paused or as needing attention if recovery validation fails; keep completed, failed, and canceled states visible. The user explicitly resumes or starts queued work. |
 | Fresh restart of a job | If saved bytes cannot be safely reused, require an explicit fresh-start action. Preserve existing partial data unless the user explicitly chooses its removal, and never overwrite an existing destination. |
@@ -449,7 +476,7 @@ This feature uses multiple ordinary connections. It does not require one TCP con
 
 **Done when:** A controlled demonstration proves intended egress, correct output, and recovery from interface failure. Report measured benefit without promising combined link speeds.
 
-## 16. Later work - Additional platforms and desktop integration
+## 16. Additional platforms, desktop usability, and browser integration
 
 ### v0.3: Broader interface support
 
@@ -459,20 +486,100 @@ This feature uses multiple ordinary connections. It does not require one TCP con
 
 ### Desktop GUI (parallel track)
 
-The operator selected a Go desktop app using Fyne on 2026-11-05. The single-download UI includes persistent history, checkpoint resume, and explicit duplicate-file choices. A separate Queue tab manages the persistent CLI queue with configurable concurrency and per-job controls.
+The operator selected a Go desktop app using Fyne on 2026-11-05. The current prototype separates standalone Downloads from a Queue tab. On 2026-11-09, the operator reported that the queue interaction is confusing. The selected direction is one Downloads view backed by the persistent scheduler, followed by browser integration.
 
-- [ ] Compare a Go GUI toolkit, a web-based desktop shell, and a local browser UI.
-- [ ] Evaluate accessibility, packaging, native dependencies, and maintenance.
-- [ ] Select a framework after a small proof of concept.
-- [ ] Reuse engine operations and progress events rather than moving logic into UI callbacks.
-- [ ] Add queue controls, destination selection, progress, errors, and recovery views.
+- [x] Select Fyne after a working desktop proof of concept and operator review.
+- [x] Add prototype history, checkpoint resume, duplicate-file choices, queue controls, row progress, and live speed limits; see the recorded tests in SESSION-LOG.md.
+- [ ] Evaluate accessibility, packaging, native dependencies, and maintenance on the installed Linux build.
+- [ ] Complete the unified Downloads and browser milestones below.
 - [ ] Plan native packaging, signing, and distribution separately.
+
+### Desktop usability milestone - One Downloads view
+
+**Problem:** Users currently have to understand two download lists, queue ownership, and separate Open/Add/Start actions. The standalone list also bypasses the queue's simultaneous-download limit.
+
+**Target interaction:** Add a URL or accept a browser download, choose **Download now** or **Download later**, and see it in one list. Newly approved Download now jobs start automatically when a slot is free. Extra jobs show **Waiting** and the reason, such as "Waiting for a download slot." Download later jobs remain paused until explicitly started. Restored interrupted jobs still reopen paused; opening the application must not silently resume them.
+
+- [x] Map the current Downloads and Queue behavior and select a screen with left-side state filters, one list, contextual actions, and Downloads/Settings tabs under the operator's design-and-implement request.
+- [x] Replace the separate Queue tab with All downloads, Downloading, Waiting, Paused, Completed, and Failed filters. Keep canceled entries in All/history and explain waiting without exposing scheduler commands.
+- [x] Start the scheduler automatically. Remove Open queue, Close queue, and Start queue from normal use; retain exclusive ownership and show a competing CLI queue conflict.
+- [x] Use one Add download dialog for pasted links, with filename, folder, Download now, Download later, and safe duplicate-file choices. Browser intake will reuse this behavior when that milestone is implemented.
+- [x] Route all new desktop jobs through one scheduler and one simultaneous-download limit. Put concurrency, connection limits, default folder, and per-download/overall speed settings in Settings.
+- [ ] Show filename, progress, speed, useful remaining time, state, and a short failure explanation in each row; support long filenames, unknown totals, keyboard navigation, and readable labels.
+- [x] Offer contextual Pause, Resume, Retry, Open file, Show in folder, and Cancel actions; separate remove-from-history from confirmed deletion of verified partial data.
+- [x] Resolve safe server-provided filenames in the queue owner before writing body data, reserving paths against other jobs. Preserve copy/replacement choices and existing output protections.
+- [x] Define single-owner startup/shutdown and migrate history, queue IDs, speed-limit keys, and imported checkpoints with metadata backups. Repeated adoption matches both destination and source identity.
+- [x] Preserve completed history, saved progress, and partial files during migration without starting network transfers. Keep unimportable history visible.
+- [ ] Complete acceptance for limits, transitions, pause/resume, recovery, ownership conflicts, duplicate filenames, settings, and migration. Automated public-URL and controller coverage is implemented in desktop/unified_test.go and desktop/controller_test.go; mixed browser intake follows the browser milestone, and interactive review remains open.
+- [ ] Run an interactive Linux acceptance session: a user can add, pause, resume, and locate a completed download without learning queue terminology.
+
+**Done when:** One list and one scheduler manage desktop jobs, normal use has no manual queue setup, and migration plus interactive acceptance pass.
+
+### Browser integration milestone - Chrome, Firefox, and Opera
+
+**Goal:** When capture is enabled, clicking a supported download in a selected browser brings it into FluxGet's unified Downloads experience. Users can turn the feature off globally or for individual browsers. This is a separate product milestone after the unified desktop foundation, starting on Linux/amd64.
+
+#### Integration choice
+
+| Option | Advantages | Costs / limits | Decision |
+| --- | --- | --- | --- |
+| WebExtension plus native messaging | Browser-supported app communication, explicit extension identities, no listening web port | Requires an extension and native-host registration for each supported browser/package | Selected architecture |
+| WebExtension plus localhost HTTP service | Familiar request/response protocol | Requires port management, authentication, origin protections, and service lifecycle; still requires an extension for capture | Alternative only if native messaging proves unsuitable in a documented environment |
+| Custom URL scheme such as fluxget:// | Useful for explicit Send to FluxGet links | Does not provide general automatic capture or browser download lifecycle control; requires OS registration and input validation | Optional manual integration, insufficient for the requested feature alone |
+
+Native messaging and download operations are documented by [Chrome native messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging), [Chrome downloads](https://developer.chrome.com/docs/extensions/reference/api/downloads), [Firefox native messaging](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging), and [Firefox download-created events](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/downloads/onCreated). Firefox has different host allowlist/registration details and [background-script support](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/background). Opera documents [Chromium extension compatibility](https://help.opera.com/en/extensions/); its installed-version native-host registration and API behavior must be proven, not inferred from Chrome.
+
+#### Settings and expected behavior
+
+| Control | Planned behavior |
+| --- | --- |
+| Enable browser integration | Master switch, off until the user opts in during setup. Disabling it stops new capture without canceling existing FluxGet jobs. |
+| Chrome / Firefox / Opera | Independent enabled switches with per-profile connection status. Selecting a browser never enables the others. The effective policy requires master, browser, profile consent, and extension readiness. |
+| Connection status | Show Not installed, Extension missing, Disconnected, Ready, Disabled, or Unsupported with Install extension, Test connection, and Repair actions as appropriate. Detection alone never means capture is ready. |
+| Capture mode | Ask before downloading by default; optional automatic Download now mode after successful setup, or Manual only for context-menu sending without automatic capture. All modes use the same scheduling and destination rules. |
+| Browser extension popup | Show the effective policy, provide a shortcut to settings, and offer Use browser for this download and a temporary capture pause. Local extension disable always wins. |
+| Exceptions | Per-site exclusions and supported file-type rules; an exclusion takes priority over capture. Clearly distinguish the download host from the initiating website when applying rules. |
+| Private browsing | Off by default, requires separate explicit consent and browser permission; defer support until privacy and storage behavior are tested. |
+
+The desktop policy is authoritative and persisted by one owner. Extensions obtain a versioned policy/readiness response before taking over a download. A disconnected host or stale/unknown policy leaves new downloads in the browser. The host also enforces master/browser/profile restrictions, so stale extension state cannot bypass a disabled browser. Changes affect new handoffs immediately at validation; define and test what happens to a handoff already paused or pending.
+
+#### Implementation order and gates
+
+1. **Capability spike and acceptance contract:** Test actual downloads in each installed browser and profile. Record versions, package format (native, Snap, or Flatpak), download-event timing, available request metadata, pause/resume/cancel behavior, extension background lifecycle, and native-host discovery. Browser sandbox restrictions need tested packaging support; do not disable the sandbox. Set a finite handoff timeout and document the supported input matrix before automatic capture.
+2. **Shared desktop intake:** Add validated structured add/status requests, stable request IDs, pending handoff records, and idempotent job creation to the single scheduler owner. Specify private IPC access controls, app activation, concurrent browser requests, single-instance locking, disconnects, and protocol-version compatibility. Keep transfer and persistence logic out of extension/UI handlers.
+3. **Go native host:** Implement bounded length-prefixed JSON messages over stdin/stdout, reserve stdout for protocol messages, and send redacted diagnostics to stderr. Validate extension origin/identity, request schema, message sizes, URL schemes, filenames, and policy. Launch binaries directly with arguments, never via a shell. Permit only known extension IDs in browser host manifests.
+4. **Manual handoff first:** Add Send link to FluxGet to the extension context menu and a connection test. Use a shared JavaScript core with separate Chrome, Firefox, and Opera packaging/configuration. Prove successful enqueueing, desktop activation, and concurrent requests before adding interception. Manual link sending must remain useful when automatic capture is disabled only by the user's capture-mode preference; a master/browser disable blocks all extension intake.
+5. **Safe automatic capture:** Use supported downloads events and lifecycle APIs. These events occur when a browser download begins, so zero browser traffic or zero temporary bytes is not a guarantee. Verify policy/readiness, classify eligibility, and pause the browser item before preparing the transfer. Persist a pending FluxGet request without starting network work; cancel the browser item only after that request and destination acceptance are acknowledged, then activate the same request once cancellation is confirmed. Do not start two transfers in the normal handoff path.
+6. **Failure and crash recovery:** If the item already completed, pause fails, the user chooses Use browser, or eligibility/desktop acceptance fails, abandon the pending FluxGet request and leave or resume the browser item. Confirm browser state before retrying cancellation or activation. Persist request IDs and handoff stages so extension suspension, lost acknowledgments, and host/app crashes cannot create duplicate jobs. Pending requests must not auto-start without the transfer-of-ownership confirmation. After browser cancellation, reconcile the accepted request or show an explicit recovery action; do not promise a canceled browser item can always resume. Fallback downloads must bypass capture once to prevent loops. Never erase unrelated browser history or files.
+7. **Settings and setup:** Implement the controls above, synchronize effective policy, test disable changes during a handoff, and provide user-driven install/repair/uninstall registration. The desktop can link to extension installation and verify it; do not silently install browser extensions or edit browser profile databases.
+8. **Browser rollout:** Prove Chrome on Linux first, then Firefox with its manifest/host differences, then Opera with independently verified registration and behavior. Keep the same protocol and UI. Publish a capability matrix by browser, version, OS, and package format; unsupported combinations retain normal browser downloads.
+9. **Distribution:** Package the host with FluxGet, register it for selected browsers, establish stable extension IDs, and document extension store submission/signing, required permissions, privacy disclosures, updates, and uninstall cleanup. Development-only unpacked extensions are not the release installation experience.
+
+#### Initial supported inputs and later authenticated downloads
+
+- Start with replayable public HTTP/HTTPS GET file downloads and explicit user-selected public links. Do not assume an HTTP URL or an onCreated event proves the original method, public accessibility, or replayability. During the spike, determine how each browser can establish eligibility with minimal permissions; unknown cases remain in the browser.
+- Leave POST/form-body downloads, blob/data URLs, browser-generated files, authenticated/cookie-dependent downloads, expiring or single-use secret links, streaming media, and protected downloads in the browser until separately supported. Browser item URL/filename metadata alone is insufficient to reproduce these requests reliably.
+- Request only the permissions needed by each stage, such as downloads, native messaging, storage, and context menus. Add site/host permissions only with a documented need and explicit consent. Do not request cookies or broad request interception for the initial public-link feature.
+- Do not transfer browser cookies, authorization headers, complete browsing history, or arbitrary request headers in the initial bridge. Redact query strings and sensitive URL components from diagnostics and reject credential-bearing workflows unsupported by the current metadata policy. Define detection limits; a public-looking URL is not proof it contains no secret.
+- Never use FluxGet to bypass a browser security block, malware warning, enterprise download policy, or certificate failure. If the browser's security decision is unknown or cannot be preserved for a download class, leave that class in the browser; FluxGet must not imply it inherits browser scanning guarantees.
+- A later authenticated-download milestone must design consent, scoped cookie/header access, redirect-origin restrictions, signed-URL handling, secret storage/redaction, expiration, and crash recovery before expanding capture. Do not copy browser profile cookies or weaken TLS checks as a shortcut.
+
+#### Acceptance requirements
+
+- [ ] In each supported browser, a supported download reaches the one Downloads list and produces matching bytes, with no duplicate FluxGet job or completed browser copy in the tested handoff scenarios.
+- [ ] Master disable, per-browser disable, profile consent, extension disable, exclusions, and temporary bypass work independently and survive restarts as intended; existing FluxGet jobs continue unaffected.
+- [ ] Missing extension/host, outdated protocol, locked queue, desktop startup failure, user rejection, and full disk preserve a browser download or offer a specific recoverable pending job without silent loss.
+- [ ] Race tests cover tiny/instant downloads, parallel browser events, duplicate delivery, disable during handoff, extension background suspension, browser exit, and crashes before/after browser cancellation and desktop activation.
+- [ ] Unsupported URLs, POST, authentication, private browsing without consent, unsafe filenames, redirects, and browser-blocked downloads follow the documented fallback policy.
+- [ ] Installation, extension approval, connection testing, capture, repair, update, and uninstall pass manually on each claimed browser/package combination. Record evidence before claiming support.
+
+**Done when:** Users can opt in per browser, capture supported downloads without understanding queue setup, disable capture reliably, and retain a clear browser fallback for unsupported cases. Exact IDM parity is not a release claim.
 
 ### Optional extensions
 
 - Adaptive interface scheduling and user-defined metered-network limits.
 - Bandwidth caps, scheduled queues, and completion notifications.
-- Browser integration.
+- Additional browser families after Chrome, Firefox, and Opera have verified support.
 - Authenticated downloads with a reviewed secret-handling design.
 - A background service or local control API if a concrete workflow requires it.
 
@@ -484,14 +591,31 @@ The operator selected a Go desktop app using Fyne on 2026-11-05. The single-down
 | 2 | Safe parallel downloader | Goroutines, synchronization, worker pools, and backpressure |
 | 3 | Pause and crash recovery | Persistence, lifecycle design, and durability reasoning |
 | 4 | Usable queue and CLI | Component boundaries, scheduling, and understandable behavior |
-| 5 | Verified v0.1 release | Cross-platform testing, fault injection, documentation, and delivery |
-| 6 | Multi-interface prototype | Socket programming, routing, platform adapters, and measurement |
-| 7 | Desktop application | Reuse of the engine through another interface |
+| 5 | Unified desktop Downloads experience | Consistent state ownership, scheduling, migration, and usable controls |
+| 6 | Optional browser capture | Native messaging, browser compatibility, reliable handoff, and policy enforcement |
+| 7 | Verified v0.1 engine release, checked alongside desktop work | Platform testing, fault injection, documentation, and delivery |
+| 8 | Multi-interface prototype | Socket programming, routing, platform adapters, and measurement |
 
 Prefer evidence over broad claims. Show reproducible scenarios, failure handling, design tradeoffs, and measured behavior. Keep the engine understandable enough that another developer can review its correctness.
 
-## 18. Immediate next work
+## 18. Roadmap and immediate next work
 
-Complete the remaining v0.1 release checks, including release-environment verification and broader resource-bound testing.
+The following priority order reflects the operator's 2026-11-09 feedback. Browser integration depends on unified intake and scheduler ownership; multi-interface work follows these usability milestones. Continue the remaining v0.1 release verification alongside product development without claiming an engine release is already complete.
 
-Develop the Fyne desktop interface alongside the CLI, starting on Linux/amd64; keep multi-interface work and native support claims gated by their own tests.
+| # | Task | Status | Notes |
+| --- | --- | --- | --- |
+| 1 | CLI and desktop prototype baseline | ✅ Done | Commit 12635b4 installed locally; recorded automated checks cover the prototype, not full release acceptance |
+| 2 | Simplify Downloads and queue interaction | 🔄 Current | Implementation, automated coverage, and local preview installation complete; operator interactive acceptance remains |
+| 3 | Browser capability spike and native-bridge contract | ⬜ Todo | Next; check Chrome, Firefox, and Opera capabilities and package constraints |
+| 4 | Shared intake, native host, and manual Send to FluxGet | ⬜ Todo | Versioned protocol, one owner, idempotent pending requests, extension connection tests |
+| 5 | Chrome automatic capture and integration settings | ⬜ Todo | Master/per-browser controls, safe handoff, supported public downloads, fallback |
+| 6 | Firefox and Opera rollout | ⬜ Todo | Browser-specific manifests/registration; native package testing and compatibility matrix |
+| 7 | Browser integration packaging and acceptance | ⬜ Todo | Store distribution, stable IDs, repair/uninstall, crash tests, privacy and permission review |
+| 8 | Remaining v0.1 engine release checks | ⬜ Todo | Continue alongside desktop work: resource bounds, release environment, evidence review, final artifacts |
+| 9 | Multi-interface experiment | ⬜ Todo | Later; keep platform and routing evidence requirements from Phase 8 |
+| 10 | Authenticated browser downloads | ⬜ Todo | Separate credential and request-replay design; unsupported in the initial integration |
+
+### ➡️ Current: #2 - Simplify Downloads and queue interaction
+### ⏭️ Next: #3 - Browser capability spike and native-bridge contract
+
+**Next concrete action:** Interactively review the unified Downloads preview: add several files, check Waiting and Download later, pause/resume, inspect Settings, and verify completed-file actions. Resolve any usability issues before beginning the browser capability spike. Browser extensions and a native host remain unimplemented.

@@ -183,13 +183,13 @@ func verifyOwnedPartial(partial *os.File, c checkpoint) error {
 	if err != nil || links != 1 || !reflect.DeepEqual(identity, c.PartialIdentity) {
 		return errors.New("partial identity or link count does not match checkpoint")
 	}
-	if c.Version == 3 {
+	if c.parallel() {
 		for _, chunk := range c.Chunks {
-			if chunk.SHA256 == "" {
+			if chunk.savedLength() == 0 {
 				continue
 			}
-			digest, err := chunkDigest(partial, chunk)
-			if err != nil || !strings.EqualFold(digest, chunk.SHA256) {
+			digest, err := chunkPrefixDigest(partial, chunk)
+			if err != nil || !strings.EqualFold(digest, chunk.savedDigest()) {
 				return errors.New("saved chunk does not match partial")
 			}
 		}

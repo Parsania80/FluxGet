@@ -82,9 +82,9 @@ func savedJobState(path string, c checkpoint) string {
 	if err != nil || !info.Mode().IsRegular() || info.Size() < c.Completed {
 		return "needs-attention"
 	}
-	if c.Version == 3 {
+	if c.parallel() {
 		for _, chunk := range c.Chunks {
-			if chunk.SHA256 != "" && info.Size() < chunk.End {
+			if chunk.savedLength() > 0 && info.Size() < chunk.Start+chunk.savedLength() {
 				return "needs-attention"
 			}
 		}

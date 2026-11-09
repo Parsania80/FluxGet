@@ -80,7 +80,7 @@ func TestParallelChunkCrashRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if saved.Version != 3 || saved.Chunks[0].SHA256 != "" || saved.Chunks[1].SHA256 == "" {
+	if saved.Version != 4 || saved.Chunks[0].SHA256 != "" || saved.Chunks[1].SHA256 == "" {
 		t.Fatalf("unexpected checkpoint %+v; child stderr %s", saved, stderr.String())
 	}
 	recovery.Store(true)

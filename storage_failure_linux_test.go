@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -206,7 +207,15 @@ func TestTransferStopsWhenCheckpointUpdateFails(t *testing.T) {
 	for {
 		before, err = os.ReadFile(path)
 		if err == nil {
-			break
+			var saved checkpoint
+			if err := json.Unmarshal(before, &saved); err != nil {
+				t.Fatal(err)
+			}
+			// The initial checkpoint has no reusable bytes. Inject the failure
+			// only after a nonempty prefix has actually been saved.
+			if saved.Completed >= 1<<20 {
+				break
+			}
 		}
 		select {
 		case <-deadline:

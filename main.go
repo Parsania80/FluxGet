@@ -67,6 +67,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 			ctx = context.WithValue(ctx, limiterContextKey{}, limiter)
 		}
 		if *liveFile != "" {
+			if limiter == nil {
+				ctx = context.WithValue(ctx, limiterContextKey{}, &speedLimiter{gate: make(chan struct{}, 1), live: &liveSpeedSource{path: *liveFile, key: "overall"}})
+			}
 			ctx = context.WithValue(ctx, liveSpeedKey{}, *liveFile)
 		}
 		if err := runQueue(ctx, os.Stdin, stdout, *maxActive, *connections); err != nil {
@@ -132,13 +135,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		if *resume {
 			n, attemptErr = resumeDownloadWithLimit(ctx, client, *destination, *checksum, stderr, *connections)
 		} else if first || pendingName {
-			var resolve func(http.Header)
+			var resolve func(http.Header) error
 			if pendingName {
-				resolve = func(header http.Header) {
+				resolve = func(header http.Header) error {
 					if filename := serverFilename(header); filename != "" {
 						*destination = filepath.Join(filepath.Dir(*destination), filename)
 					}
 					pendingName = false
+					return nil
 				}
 			}
 			n, attemptErr = downloadFreshNamed(ctx, client, *rawURL, destination, *checksum, stderr, *connections, resolve)

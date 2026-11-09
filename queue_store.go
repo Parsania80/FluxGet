@@ -26,6 +26,12 @@ type queueJob struct {
 	State          string         `json:"state"`
 	ExpectedSHA256 string         `json:"expected_sha256,omitempty"`
 	Cleanup        *cleanupIntent `json:"cleanup,omitempty"`
+	AutomaticName  bool           `json:"automatic_name,omitempty"`
+	Message        string         `json:"message,omitempty"`
+	Progress       string         `json:"progress,omitempty"`
+	Conflict       string         `json:"conflict,omitempty"`
+	OutputPath     string         `json:"output_path,omitempty"`
+	SavedProgress  *float64       `json:"saved_progress,omitempty"`
 }
 type queueData struct {
 	Version int        `json:"version"`
@@ -50,7 +56,7 @@ func validQueueURL(raw string) bool {
 }
 
 func loadQueue(path string) (queueData, error) {
-	q := queueData{Version: 1, NextID: 1}
+	q := queueData{Version: 2, NextID: 1}
 	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return q, nil
@@ -72,12 +78,21 @@ func loadQueue(path string) (queueData, error) {
 	if err = dec.Decode(&q); err != nil {
 		return q, err
 	}
-	if dec.Decode(new(any)) != io.EOF || q.Version != 1 || q.NextID < 1 {
+	if dec.Decode(new(any)) != io.EOF || (q.Version != 1 && q.Version != 2) || q.NextID < 1 {
 		return q, errors.New("invalid queue metadata")
 	}
 	ids := make(map[int]bool)
 	destinations := make(map[string]bool)
 	for _, j := range q.Jobs {
+		if j.SavedProgress != nil && (*j.SavedProgress < 0 || *j.SavedProgress > 1) {
+			return q, errors.New("invalid saved progress")
+		}
+		if len(j.Message) > 4096 || len(j.Progress) > 1024 || (j.Conflict != "" && (!filepath.IsAbs(j.Conflict) || filepath.Clean(j.Conflict) != j.Conflict)) {
+			return q, errors.New("invalid queue details")
+		}
+		if j.OutputPath != "" && (j.State != "completed" || !filepath.IsAbs(j.OutputPath) || filepath.Clean(j.OutputPath) != j.OutputPath) {
+			return q, errors.New("invalid completed output path")
+		}
 		if j.ID < 1 || j.ID >= q.NextID || ids[j.ID] || destinations[j.Destination] || !filepath.IsAbs(j.Destination) || filepath.Clean(j.Destination) != j.Destination || !validQueueURL(j.URL) {
 			return q, errors.New("invalid queue job")
 		}
@@ -110,6 +125,7 @@ func loadQueue(path string) (queueData, error) {
 }
 
 func saveQueue(path string, q queueData) error {
+	q.Version = 2
 	data, err := json.Marshal(q)
 	if err != nil {
 		return err

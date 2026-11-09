@@ -21,7 +21,7 @@ func download(ctx context.Context, client *http.Client, rawURL, destination, exp
 	return downloadNamed(ctx, client, rawURL, &destination, expectedSHA256, progress, nil)
 }
 
-func downloadNamed(ctx context.Context, client *http.Client, rawURL string, destinationPtr *string, expectedSHA256 string, progress io.Writer, resolve func(http.Header)) (int64, error) {
+func downloadNamed(ctx context.Context, client *http.Client, rawURL string, destinationPtr *string, expectedSHA256 string, progress io.Writer, resolve func(http.Header) error) (int64, error) {
 	destination := *destinationPtr
 	if ctx == nil || client == nil {
 		return 0, errors.New("a context and HTTP client are required")
@@ -85,7 +85,9 @@ func downloadNamed(ctx context.Context, client *http.Client, rawURL string, dest
 		return 0, err
 	}
 	if resolve != nil {
-		resolve(response.Header)
+		if err := resolve(response.Header); err != nil {
+			return 0, err
+		}
 		destination = *destinationPtr
 		announceDestination(progress, destination)
 		partialPath = destination + ".part"
@@ -148,6 +150,11 @@ func downloadNamed(ctx context.Context, client *http.Client, rawURL string, dest
 	// Copy streams through bounded buffering rather than retaining the whole file.
 	hash := sha256.New()
 	tracker := &progressWriter{writer: io.MultiWriter(partial, hash), output: progress, total: response.ContentLength, start: time.Now()}
+	segments := newSegmentSession(progress, "sequential", 1, []transferSegment{{Start: 0, End: response.ContentLength, State: "downloading"}})
+	complete := false
+	defer func() { segments.finish(ctx, complete) }()
+	tracker.segment = segments.part(0)
+	tracker.segments = segments
 	if saved != nil && saved.Total != nil {
 		tracker.checkpoint = checkpointProgress(checkpointPath, partial, saved, hash, 0)
 	}
@@ -166,6 +173,8 @@ func downloadNamed(ctx context.Context, client *http.Client, rawURL string, dest
 	if expected != nil && !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), expectedSHA256) {
 		return written, fmt.Errorf("SHA-256 mismatch; partial data kept at %q", partialPath)
 	}
+	tracker.segment.setState(segmentVerifying)
+	segments.publish()
 	if err := partial.Sync(); err != nil {
 		return written, fmt.Errorf("sync partial file %q: %w", partialPath, err)
 	}
@@ -191,6 +200,7 @@ func downloadNamed(ctx context.Context, client *http.Client, rawURL string, dest
 			return written, fmt.Errorf("file completed at %q, but checkpoint cleanup failed: %w", destination, err)
 		}
 	}
+	complete = true
 	return written, nil
 }
 
@@ -249,11 +259,14 @@ type progressWriter struct {
 	start        time.Time
 	last         time.Time
 	checkpoint   func(int64) error
+	segment      *segmentPart
+	segments     *segmentSession
 }
 
 func (p *progressWriter) Write(data []byte) (int, error) {
 	n, err := p.writer.Write(data)
 	p.written += int64(n)
+	p.segment.setReceived(p.written)
 	if err == nil && p.checkpoint != nil {
 		err = p.checkpoint(p.written)
 	}
@@ -264,6 +277,7 @@ func (p *progressWriter) Write(data []byte) (int, error) {
 }
 
 func (p *progressWriter) report() {
+	p.segments.publish()
 	if p.output == nil {
 		return
 	}

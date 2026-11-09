@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -21,9 +22,12 @@ type queueProgress struct {
 	source *queueProgressWriter
 }
 type queueProgressWriter struct {
-	id      int
-	updates chan<- queueProgress
+	id       int
+	updates  chan<- queueProgress
+	segments atomic.Pointer[segmentSnapshot]
 }
+
+func (w *queueProgressWriter) ReportSegments(snapshot segmentSnapshot) { w.segments.Store(&snapshot) }
 
 func (w *queueProgressWriter) Write(p []byte) (int, error) {
 	msg := strings.TrimSpace(string(p))
@@ -42,6 +46,13 @@ type queueResult struct {
 	err error
 }
 
+type queueNameRequest struct {
+	id          int
+	destination string
+	done        chan error
+}
+type queueNameKey struct{}
+
 // runQueue owns all queue state; workers only report their results through done.
 func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive, connections int) error {
 	path, err := queuePath()
@@ -57,9 +68,20 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 	if err != nil {
 		return fmt.Errorf("load queue: %w", err)
 	}
+	if _, err := os.Lstat(path); err == nil {
+		if err := backupQueue(path); err != nil {
+			return fmt.Errorf("back up queue: %w", err)
+		}
+	}
 	for i := range q.Jobs {
 		if q.Jobs[i].State == "running" {
 			q.Jobs[i].State = "paused"
+			q.Jobs[i].Progress, q.Jobs[i].SavedProgress = "", nil
+			if cp, e := checkpointLocation(q.Jobs[i].Destination); e == nil {
+				if saved, e := loadCheckpoint(cp); e == nil && saved.URL == q.Jobs[i].URL && saved.Destination == q.Jobs[i].Destination && saved.Total != nil {
+					q.Jobs[i].Progress = fmt.Sprintf("Downloaded %d/%d bytes", saved.Completed, *saved.Total)
+				}
+			}
 		}
 	}
 	if err := saveQueue(path, q); err != nil {
@@ -85,12 +107,23 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 	}()
 	done := make(chan queueResult, maxActive)
 	updates := make(chan queueProgress, maxActive*2)
+	names := make(chan queueNameRequest)
 	progressWriters := make(map[int]*queueProgressWriter)
+	speeds := make(map[int]*queueSpeed)
+	layouts := make(map[int]segmentSnapshot)
+	for _, job := range q.Jobs {
+		if cp, e := checkpointLocation(job.Destination); e == nil {
+			if c, e := loadCheckpoint(cp); e == nil && c.URL == job.URL && c.Destination == job.Destination {
+				layouts[job.ID] = segmentsFromCheckpoint(c, connections)
+			}
+		}
+	}
 	active := make(map[int]context.CancelFunc)
 	requested := make(map[int]string)
-	started, stopping := false, false
+	started, stopping, desktopInitialized := false, false, false
 	ctxDone := ctx.Done()
 	var stopErr error
+	var desktopRevision uint64
 	fmt.Fprintln(output, "Queue ready. Type help for commands; start begins queued downloads.")
 	persist := func() error {
 		if err := saveQueue(path, q); err != nil {
@@ -145,7 +178,19 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 				active[job.ID] = cancel
 				writer := &queueProgressWriter{id: job.ID, updates: updates}
 				progressWriters[job.ID] = writer
-				go func() { done <- queueResult{job.ID, runQueueDownloadWithProgress(workerCtx, job, connections, writer)} }()
+				delete(layouts, job.ID)
+				baseline := int64(0)
+				if cp, err := checkpointLocation(job.Destination); err == nil {
+					if saved, err := loadCheckpoint(cp); err == nil && saved.URL == job.URL && saved.Destination == job.Destination {
+						baseline = saved.Completed
+						layouts[job.ID] = segmentsFromCheckpoint(saved, connections)
+					}
+				}
+				speeds[job.ID] = &queueSpeed{bytes: baseline, sampled: time.Now()}
+				workerCtx = context.WithValue(workerCtx, queueNameKey{}, names)
+				go func(connectionLimit int) {
+					done <- queueResult{job.ID, runQueueDownloadWithProgress(workerCtx, job, connectionLimit, writer)}
+				}(connections)
 			}
 		}
 		if stopping && len(active) == 0 {
@@ -158,12 +203,40 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 			shutdown(err)
 		case update := <-updates:
 			if progressWriters[update.id] == update.source && update.text != "" {
+				if speed := speeds[update.id]; speed != nil {
+					speed.update(update.text, time.Now())
+				}
+				if i := find(update.id); i >= 0 && strings.Contains(update.text, "Downloaded ") {
+					q.Jobs[i].Progress = update.text
+				}
 				fmt.Fprintf(output, "Job %d: %s\n", update.id, update.text)
 			}
+		case request := <-names:
+			i := find(request.id)
+			var nameErr error
+			if i < 0 || stopping || requested[request.id] != "" {
+				nameErr = context.Canceled
+			} else if nameErr = queueDestinationAvailable(q, request.destination, request.id); nameErr != nil {
+				q.Jobs[i].Conflict = request.destination
+			} else {
+				q.Jobs[i].Destination = request.destination
+				q.Jobs[i].AutomaticName = false
+				q.Jobs[i].Conflict = ""
+				if nameErr = persist(); nameErr != nil {
+					shutdown(nameErr)
+				}
+			}
+			request.done <- nameErr
 		case result := <-done:
+			if writer := progressWriters[result.id]; writer != nil {
+				if snapshot := writer.segments.Load(); snapshot != nil {
+					layouts[result.id] = *snapshot
+				}
+			}
 			active[result.id]()
 			delete(active, result.id)
 			delete(progressWriters, result.id)
+			delete(speeds, result.id)
 			i := find(result.id)
 			if i < 0 {
 				shutdown(errors.New("active job disappeared"))
@@ -185,6 +258,32 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 				state = "failed"
 			}
 			q.Jobs[i].State = state
+			if layout, ok := layouts[result.id]; ok && state == "completed" {
+				layout.Parts = append([]transferSegment(nil), layout.Parts...)
+				for i := range layout.Parts {
+					layout.Parts[i].State = "completed"
+					if layout.Parts[i].End >= layout.Parts[i].Start {
+						layout.Parts[i].Downloaded = layout.Parts[i].End - layout.Parts[i].Start
+					}
+				}
+				layouts[result.id] = layout
+			}
+			if layout, ok := layouts[result.id]; ok && (state == "paused" || state == "canceled") {
+				layout.Parts = append([]transferSegment(nil), layout.Parts...)
+				for i := range layout.Parts {
+					if layout.Parts[i].State != "completed" && layout.Parts[i].State != "saved" {
+						layout.Parts[i].State = state
+					}
+				}
+				layouts[result.id] = layout
+			}
+			q.Jobs[i].Message = ""
+			if result.err != nil && state == "failed" {
+				q.Jobs[i].Message = result.err.Error()
+				if len(q.Jobs[i].Message) > 4096 {
+					q.Jobs[i].Message = q.Jobs[i].Message[:4096]
+				}
+			}
 			if err := persist(); err != nil {
 				shutdown(err)
 				continue
@@ -199,6 +298,82 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 			arg = strings.TrimSpace(arg)
 			switch command {
 			case "":
+			case "desktop-json":
+				req, requestErr := decodeDesktopRequest(arg)
+				desktopRevision++
+				response := desktopResponse{ID: req.ID, Revision: desktopRevision}
+				changed := false
+				if requestErr == nil {
+					switch req.Operation {
+					case "initialize":
+						if len(active) != 0 {
+							requestErr = errors.New("cannot initialize a desktop session while downloads are active")
+						} else if !desktopInitialized {
+							for i := range q.Jobs {
+								if q.Jobs[i].State == "queued" {
+									q.Jobs[i].State = "paused"
+								}
+							}
+							changed = true
+							started = true
+							desktopInitialized = true
+						}
+					case "snapshot":
+					case "configure":
+						if req.MaxActive < 1 || req.MaxActive > 64 || req.Connections < 1 || req.Connections > 16 {
+							requestErr = errors.New("simultaneous downloads must be 1–64 and connections 1–16")
+						} else {
+							maxActive, connections = req.MaxActive, req.Connections
+						}
+					case "add", "adopt":
+						response.JobID, requestErr = desktopAdd(&q, req.Job, req.Operation == "adopt")
+						changed = requestErr == nil
+					case "published":
+						i := find(req.Job.ID)
+						info, e := os.Lstat(req.Job.OutputPath)
+						if i < 0 || q.Jobs[i].State != "completed" || !filepath.IsAbs(req.Job.OutputPath) || e != nil || !info.Mode().IsRegular() {
+							requestErr = errors.New("completed replacement output is unavailable")
+						} else {
+							q.Jobs[i].OutputPath = filepath.Clean(req.Job.OutputPath)
+							changed = true
+						}
+					case "retarget":
+						i := find(req.Job.ID)
+						if i < 0 || q.Jobs[i].State == "running" || q.Jobs[i].State == "queued" || q.Jobs[i].State == "resetting" {
+							requestErr = errors.New("pause the download before choosing a new filename")
+						} else if requestErr = queueDestinationAvailable(q, req.Job.Destination, req.Job.ID); requestErr == nil {
+							old := q.Jobs[i]
+							cp, e := checkpointLocation(old.Destination)
+							if e != nil {
+								requestErr = e
+							} else if _, e = os.Lstat(cp); !errors.Is(e, os.ErrNotExist) {
+								requestErr = errors.New("saved data exists; keep it and add a separate download instead")
+							} else if _, e = os.Lstat(old.Destination + ".part"); !errors.Is(e, os.ErrNotExist) {
+								requestErr = errors.New("partial data exists; keep it and add a separate download instead")
+							} else {
+								q.Jobs[i].Destination, q.Jobs[i].AutomaticName, q.Jobs[i].Conflict = req.Job.Destination, false, ""
+								q.Jobs[i].Message, q.Jobs[i].Progress, q.Jobs[i].State = "", "", "paused"
+								q.Jobs[i].OutputPath, q.Jobs[i].SavedProgress = "", nil
+								delete(layouts, req.Job.ID)
+								changed = true
+							}
+						}
+					default:
+						requestErr = errors.New("unknown desktop operation")
+					}
+				}
+				if changed {
+					if e := persist(); e != nil {
+						requestErr = e
+						shutdown(e)
+					}
+				}
+				if requestErr != nil {
+					response.Error = requestErr.Error()
+				}
+				response.Jobs = desktopEntries(q.Jobs, speeds, liveSegmentLayouts(layouts, progressWriters), time.Now())
+				data, _ := json.Marshal(response)
+				fmt.Fprintf(output, "DESKTOP_JSON %s\n", data)
 			case "help":
 				fmt.Fprintln(output, "add URL OUTPUT | import OUTPUT | list | inspect ID | start | pause ID | resume ID | cancel ID | retry ID | restart ID | discard ID | remove ID | quit")
 			case "list":
@@ -359,6 +534,7 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 				case "remove":
 					if j.State != "running" && j.State != "queued" && j.State != "resetting" {
 						q.Jobs = append(q.Jobs[:i], q.Jobs[i+1:]...)
+						delete(layouts, id)
 						if err := persist(); err != nil {
 							shutdown(err)
 						} else {
@@ -378,6 +554,7 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 					continue
 				}
 				j.State = next
+				j.Message = ""
 				if err := persist(); err != nil {
 					shutdown(err)
 					continue
@@ -404,6 +581,36 @@ func runQueueDownloadWithProgress(ctx context.Context, j queueJob, connections i
 	}
 	defer client.CloseIdleConnections()
 	return withRetries(ctx, time.Second, func() error {
+		if j.AutomaticName {
+			resolve := func(header http.Header) error {
+				destination := j.Destination
+				if name := serverFilename(header); name != "" {
+					destination = filepath.Join(filepath.Dir(destination), name)
+				}
+				requests, ok := ctx.Value(queueNameKey{}).(chan queueNameRequest)
+				if !ok {
+					return errors.New("automatic filenames require the scheduler owner")
+				}
+				request := queueNameRequest{id: j.ID, destination: destination, done: make(chan error, 1)}
+				select {
+				case requests <- request:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+				select {
+				case err := <-request.done:
+					if err != nil {
+						return err
+					}
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+				j.Destination, j.AutomaticName = destination, false
+				return nil
+			}
+			_, err := downloadFreshNamed(ctx, client, j.URL, &j.Destination, j.ExpectedSHA256, progress, connections, resolve)
+			return err
+		}
 		_, err := runDownloadAttempt(ctx, client, j, j.ExpectedSHA256, progress, connections)
 		return err
 	})
