@@ -86,8 +86,16 @@ type limitedBody struct {
 }
 
 func (b *limitedBody) Read(p []byte) (int, error) {
-	max := int64(1024)
-	if b.limit.live == nil {
+	max := int64(0)
+	if b.limit.live != nil {
+		started := time.Now()
+		size, err := b.limit.liveReadSize(b.ctx)
+		measurementsFrom(b.ctx).addDuration(metricLimiterWait, time.Since(started))
+		if err != nil {
+			return 0, err
+		}
+		max = size
+	} else {
 		max = b.limit.bytesPerSecond / 10
 	}
 	if max < 1 {

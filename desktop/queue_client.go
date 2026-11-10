@@ -170,13 +170,18 @@ type requestPolicy struct {
 	PerOrigin int    `json:"per_origin"`
 }
 type budgetSnapshot struct {
-	Policy  requestPolicy `json:"policy"`
-	Active  int           `json:"active"`
-	Waiting int           `json:"waiting"`
+	Policy     requestPolicy `json:"policy"`
+	Active     int           `json:"active"`
+	Waiting    int           `json:"waiting"`
+	FileTarget int           `json:"file_target,omitempty"`
+	Draining   bool          `json:"draining,omitempty"`
+	Status     string        `json:"status,omitempty"`
+	Reason     string        `json:"reason,omitempty"`
 }
 type jobBudgetSnapshot struct {
-	Active  int `json:"active"`
-	Waiting int `json:"waiting"`
+	Active   int  `json:"active"`
+	Waiting  int  `json:"waiting"`
+	Cooldown bool `json:"cooldown,omitempty"`
 }
 type measurementSnapshot struct {
 	Accepted    int64 `json:"accepted_bytes"`

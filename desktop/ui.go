@@ -73,6 +73,7 @@ func main() {
 }
 
 type downloadsView struct {
+	managementNote                                           *widget.Label
 	app                                                      fyne.App
 	window                                                   fyne.Window
 	settings                                                 *speedSettings
@@ -108,6 +109,9 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 	v.status = widget.NewLabel("Preparing your downloads…")
 	v.status.Wrapping = fyne.TextWrapWord
 	v.summary = widget.NewLabel("")
+	v.summary.Truncation = fyne.TextTruncateEllipsis
+	v.managementNote = widget.NewLabel("Automatic learns from your downloads")
+	v.managementNote.Truncation = fyne.TextTruncateEllipsis
 	v.add = widget.NewButtonWithIcon("Add download", theme.ContentAddIcon(), v.addDialog)
 	v.add.Importance = widget.HighImportance
 	v.pause = widget.NewButtonWithIcon("Pause", theme.MediaPauseIcon(), func() { v.command("pause") })
@@ -192,8 +196,10 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 			button.Enable()
 			remove.Enable()
 		}
-		details := downloadState(j.State) + "  ·  " + downloadDetails(j, v.settings.DisplayUnit)
-		if j.State == "running" && j.Requests != nil && j.Requests.Active == 0 && j.Requests.Waiting > 0 {
+		details := j.displayState() + "  ·  " + downloadDetails(j, v.settings.DisplayUnit)
+		if j.Activity != "" {
+			details = j.Activity + "  ·  " + downloadDetails(j, v.settings.DisplayUnit)
+		} else if j.State == "running" && j.Requests != nil && j.Requests.Active == 0 && j.Requests.Waiting > 0 {
 			details = "Waiting for a connection slot  ·  " + downloadDetails(j, v.settings.DisplayUnit)
 		}
 		box.Objects[1].(*widget.Label).SetText(details)
@@ -250,7 +256,7 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 	title := widget.NewLabelWithStyle("Downloads", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	toolbar := container.NewHBox(v.add, v.pause, v.resume, v.retry, v.open, v.folder, v.more)
 	selectionBar := container.NewHBox(v.selectAll, v.clearSelection, v.selectionCount, v.remove)
-	top := container.NewPadded(container.NewVBox(title, v.summary, toolbar, selectionBar, widget.NewSeparator()))
+	top := container.NewPadded(container.NewVBox(title, v.summary, v.managementNote, toolbar, selectionBar, widget.NewSeparator()))
 	downloads := container.NewBorder(top, nil, nil, nil, split)
 	settings.applyDownloads = v.applySettings
 	settingsPage := settings.page(w, func() { v.refresh() }, func() bool { return v.ready && !v.busy && !v.closing })
@@ -354,7 +360,7 @@ func (v *downloadsView) refresh() {
 		}
 	}
 	v.restoring = false
-	running, waiting, paused := 0, 0, 0
+	running, waiting, paused, checking, verifying := 0, 0, 0, 0, 0
 	for _, row := range downloadRows(v.entries, v.history, "All downloads") {
 		switch row.Entry.displayState() {
 		case "Downloading":
@@ -363,12 +369,38 @@ func (v *downloadsView) refresh() {
 			waiting++
 		case "Paused":
 			paused++
+		case "Checking":
+			checking++
+		case "Verifying":
+			verifying++
 		}
 	}
 	summary := fmt.Sprintf("%d downloading  ·  %d waiting  ·  %d paused  ·  up to %d at once", running, waiting, paused, v.settings.MaxActive)
+	if checking > 0 {
+		summary += fmt.Sprintf("  ·  %d checking", checking)
+	}
+	if verifying > 0 {
+		summary += fmt.Sprintf("  ·  %d verifying", verifying)
+	}
 	if v.management != nil {
 		summary = map[string]string{"automatic": "Automatic", "manual": "Manual"}[v.management.Policy.Mode] + "  ·  " + summary
 	}
+	if v.management != nil && v.management.Policy.Mode == "automatic" {
+		summary += fmt.Sprintf("  ·  target %d files  ·  %s", v.management.FileTarget, v.management.Status)
+		if v.management.Draining {
+			summary += "  ·  Letting active downloads finish"
+		}
+
+	}
+	note := "Automatic learns from your downloads"
+	if v.management != nil {
+		if v.management.Policy.Mode == "manual" {
+			note = "Manual uses your configured download and connection limits"
+		} else if v.management.Reason != "" {
+			note = v.management.Reason
+		}
+	}
+	v.managementNote.SetText(note)
 	v.summary.SetText(summary)
 	v.actions()
 }

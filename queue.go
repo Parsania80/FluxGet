@@ -55,6 +55,14 @@ type queueNameKey struct{}
 
 // runQueue owns all queue state; workers only report their results through done.
 func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive, connections int) error {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	return runQueueClock(ctx, input, output, maxActive, connections, time.Now, ticker.C)
+}
+
+// A clock boundary lets scheduler integration tests advance observation windows
+// while real HTTP transfers and checkpoint owners continue normally.
+func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxActive, connections int, clock func() time.Time, ticks <-chan time.Time) error {
 	path, err := queuePath()
 	if err != nil {
 		return err
@@ -110,8 +118,8 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 	samplers := make(map[int]*observationSampler)
 	observations := make(map[int]transferObservation)
 	generation := uint64(1)
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+	automatic := newAutomaticController()
+	defer budget.close()
 	done := make(chan queueResult, maxActive)
 	updates := make(chan queueProgress, maxActive*2)
 	names := make(chan queueNameRequest)
@@ -128,6 +136,7 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 	active := make(map[int]context.CancelFunc)
 	workerControls := make(map[int]*workerControl)
 	requested := make(map[int]string)
+	seenTimeouts := make(map[int]int64)
 	started, stopping, desktopInitialized := false, false, false
 	ctxDone := ctx.Done()
 	var stopErr error
@@ -167,13 +176,45 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 			cancel()
 		}
 	}()
+	applyAutomatic := func(update *automaticUpdate) {
+		if update == nil {
+			return
+		}
+		if control := workerControls[update.job]; control != nil {
+			maximum := control.settings.Load().Maximum
+			_ = control.set(maximum, min(maximum, max(1, update.target)))
+		}
+	}
+	automaticJobs := func() []automaticJob {
+		jobs := make([]automaticJob, 0, len(active))
+		_, requests := budget.snapshot()
+		live := liveSegmentLayouts(layouts, progressWriters)
+		for _, job := range q.Jobs {
+			control := workerControls[job.ID]
+			if control == nil {
+				continue
+			}
+			settings := control.settings.Load()
+			origin := queueOrigin(job.URL)
+			if actual := measurements[job.ID].origin.Load(); actual != nil {
+				origin = *actual
+			}
+			jobs = append(jobs, automaticJob{id: job.ID, origin: origin, layout: live[job.ID], metrics: measurements[job.ID].snapshot(), target: settings.Target, maximum: settings.Maximum, requests: requests[job.ID], stopping: requested[job.ID] != ""})
+		}
+		return jobs
+	}
 	for {
+		management, _ := budget.snapshot()
+		fileMaximum := maxActive
+		if management.Policy.Mode == "automatic" {
+			fileMaximum = automatic.admissionMaximum(maxActive, automaticJobs(), budget, clock())
+		}
 		if started && !stopping {
 			for i := range q.Jobs {
-				if len(active) >= maxActive {
+				if len(active) >= fileMaximum {
 					break
 				}
-				if q.Jobs[i].State != "queued" {
+				if q.Jobs[i].State != "queued" || (management.Policy.Mode == "automatic" && !budget.canStart(queueOrigin(q.Jobs[i].URL), clock())) {
 					continue
 				}
 				q.Jobs[i].State = "running"
@@ -183,11 +224,12 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 				}
 				job := q.Jobs[i]
 				generation++
+				automatic.admitted(generation)
 				workerCtx, cancel := context.WithCancel(ctx)
 				m := &transferMeasurements{}
 				measurements[job.ID] = m
 				samplers[job.ID] = &observationSampler{}
-				samplers[job.ID].sample(time.Now(), m.snapshot(), generation)
+				samplers[job.ID].sample(clock(), m.snapshot(), generation)
 				delete(observations, job.ID)
 				workerCtx = context.WithValue(workerCtx, measurementContextKey{}, m)
 				workerCtx = context.WithValue(workerCtx, budgetContextKey{}, budget)
@@ -210,7 +252,7 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 						layouts[job.ID] = segmentsFromCheckpoint(saved, connections)
 					}
 				}
-				speeds[job.ID] = &queueSpeed{bytes: baseline, sampled: time.Now()}
+				speeds[job.ID] = &queueSpeed{bytes: baseline, sampled: clock()}
 				workerCtx = context.WithValue(workerCtx, queueNameKey{}, names)
 				go func(connectionLimit int) {
 					done <- queueResult{job.ID, runQueueDownloadWithProgress(workerCtx, job, connectionLimit, writer)}
@@ -221,7 +263,41 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 			return stopErr
 		}
 		select {
-		case now := <-ticker.C:
+		case now := <-ticks:
+			if management.Policy.Mode == "automatic" && !stopping {
+				if automatic.readLimits(ctx) {
+					generation++
+				}
+				jobs := automaticJobs()
+				feedback := budget.takeFeedback()
+				timedOut := map[int]bool{}
+				for _, j := range jobs {
+					if j.metrics.Timeouts-seenTimeouts[j.id] >= 2 {
+						timedOut[j.id] = true
+						seenTimeouts[j.id] = j.metrics.Timeouts
+					}
+				}
+				if len(feedback) > 0 || len(timedOut) > 0 {
+					applyAutomatic(automatic.discard(generation, now))
+					for origin := range feedback {
+						budget.backOffOrigin(origin, now)
+					}
+					for _, j := range jobs {
+						if feedback[j.origin] > 0 || timedOut[j.id] {
+							applyAutomatic(&automaticUpdate{j.id, max(1, j.target/2)})
+						}
+					}
+					automatic.status, automatic.reason = "Backing off", "Server requested a cooldown"
+					if len(feedback) == 0 {
+						automatic.reason = "Repeated timeouts; reducing affected download connections"
+					}
+				} else {
+					if budget.recoverOrigin(now) {
+						generation++
+					}
+					applyAutomatic(automatic.tick(now, generation, maxActive, jobs, q.Jobs, budget))
+				}
+			}
 			for id := range active {
 				if observation, ok := samplers[id].sample(now, measurements[id].snapshot(), generation); ok {
 					observations[id] = observation
@@ -234,7 +310,7 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 		case update := <-updates:
 			if progressWriters[update.id] == update.source && update.text != "" {
 				if speed := speeds[update.id]; speed != nil {
-					speed.update(update.text, time.Now())
+					speed.update(update.text, clock())
 				}
 				if i := find(update.id); i >= 0 && strings.Contains(update.text, "Downloaded ") {
 					q.Jobs[i].Progress = update.text
@@ -267,6 +343,7 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 			active[result.id]()
 			delete(active, result.id)
 			delete(workerControls, result.id)
+			delete(seenTimeouts, result.id)
 			delete(progressWriters, result.id)
 			delete(speeds, result.id)
 			i := find(result.id)
@@ -342,7 +419,10 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 						control := workerControls[req.Job.ID]
 						if i < 0 || q.Jobs[i].State != "running" || requested[req.Job.ID] != "" || control == nil {
 							requestErr = errors.New("worker targets require an active download")
+						} else if req.Connections < 1 || req.Connections > control.settings.Load().Maximum {
+							requestErr = errors.New("worker target must be within the configured connection maximum")
 						} else {
+							applyAutomatic(automatic.discard(generation, clock()))
 							requestErr = control.set(control.settings.Load().Maximum, req.Connections)
 							if requestErr == nil {
 								generation++
@@ -396,9 +476,18 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 							requestErr = errors.New("action is not available for this download state")
 						} else if cancel := active[j.ID]; cancel != nil {
 							requested[j.ID] = next
+							generation++
 							cancel()
 						} else {
 							j.State, j.Message = next, ""
+							if req.Action == "retry" || req.Action == "resume" {
+								budget.retryOrigin(queueOrigin(j.URL))
+								if m := measurements[j.ID]; m != nil {
+									if origin := m.origin.Load(); origin != nil {
+										budget.retryOrigin(*origin)
+									}
+								}
+							}
 							changed = true
 						}
 					case "initialize":
@@ -433,7 +522,12 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 								requestErr = budget.configure(*req.Management)
 							}
 							if requestErr == nil {
+								applyAutomatic(automatic.discard(generation, clock()))
 								maxActive, connections = req.MaxActive, req.Connections
+								if req.Management != nil && req.Management.Mode == "automatic" && previousPolicy.Policy.Mode != "automatic" {
+									automatic.files = 1
+								}
+								automatic.files = min(automatic.files, maxActive)
 								policy, _ := budget.snapshot()
 								for _, control := range workerControls {
 									target := connections
@@ -494,8 +588,13 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 				if requestErr != nil {
 					response.Error = requestErr.Error()
 				}
-				response.Jobs = desktopEntries(q.Jobs, speeds, liveSegmentLayouts(layouts, progressWriters), time.Now())
+				response.Jobs = desktopEntries(q.Jobs, speeds, liveSegmentLayouts(layouts, progressWriters), clock())
 				management, jobRequests := budget.snapshot()
+				if management.Policy.Mode == "automatic" {
+					management.FileTarget = automatic.files
+					management.Draining = len(active) > automatic.files
+					management.Status, management.Reason = automatic.status, automatic.reason
+				}
 				response.Management = &management
 				for i := range response.Jobs {
 					entry := &response.Jobs[i]
@@ -508,6 +607,24 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 					}
 					requestState := jobRequests[entry.ID]
 					entry.Requests = &requestState
+					if management.Policy.Mode == "automatic" && (entry.State == "running" || entry.State == "queued") {
+						entry.AutomaticReason = automatic.reason
+						if budget.originCooling(queueOrigin(entry.URL), clock()) || requestState.Cooldown {
+							entry.AutomaticReason = "Waiting for the server cooldown; retry manually if requested"
+						}
+					}
+					if entry.State == "running" {
+						switch {
+						case snapshotRetrying(entry.Measurements):
+							entry.Activity = "Waiting for retry"
+						case requestState.Active == 0 && requestState.Waiting > 0:
+							entry.Activity = "Waiting for a connection slot"
+						case len(entry.Parts) == 0:
+							entry.Activity = "Checking transfer method"
+						case partsVerifying(entry.Parts):
+							entry.Activity = "Verifying saved data"
+						}
+					}
 				}
 				// Remove transient measurements for entries removed from history.
 				for id := range measurements {
@@ -518,6 +635,16 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 					}
 				}
 
+				keepOrigins := map[string]bool{}
+				for _, job := range q.Jobs {
+					keepOrigins[queueOrigin(job.URL)] = true
+					if m := measurements[job.ID]; m != nil {
+						if origin := m.origin.Load(); origin != nil {
+							keepOrigins[*origin] = true
+						}
+					}
+				}
+				budget.pruneOrigins(keepOrigins)
 				data, _ := json.Marshal(response)
 				fmt.Fprintf(output, "DESKTOP_JSON %s\n", data)
 			case "help":

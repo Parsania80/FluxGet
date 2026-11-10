@@ -41,7 +41,9 @@ func (s *queueSpeed) current(now time.Time) float64 {
 
 type desktopEntry struct {
 	queueJob
-	Speed *float64 `json:"speed_bytes_per_second,omitempty"`
+	AutomaticReason string   `json:"automatic_reason,omitempty"`
+	Activity        string   `json:"activity,omitempty"`
+	Speed           *float64 `json:"speed_bytes_per_second,omitempty"`
 	segmentSnapshot
 	Measurements *measurementSnapshot `json:"measurements,omitempty"`
 	Observation  *transferObservation `json:"observation,omitempty"`
@@ -63,4 +65,17 @@ func desktopEntries(jobs []queueJob, speeds map[int]*queueSpeed, layouts map[int
 		entries = append(entries, entry)
 	}
 	return entries
+}
+
+func snapshotRetrying(m *measurementSnapshot) bool { return m != nil && m.Retrying > 0 }
+func partsVerifying(parts []transferSegment) bool {
+	if len(parts) == 0 {
+		return false
+	}
+	for _, p := range parts {
+		if p.State != "verifying" && p.State != "completed" && p.State != "saved" {
+			return false
+		}
+	}
+	return true
 }

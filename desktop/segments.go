@@ -64,7 +64,11 @@ func segmentSummary(j queueEntry) string {
 		return "No saved part information"
 	}
 	if j.TransferMode == "sequential" {
-		return "1 part · single connection"
+		text := "1 part · single connection"
+		if j.AutomaticReason != "" {
+			text += " · " + j.AutomaticReason
+		}
+		return text
 	}
 	active := 0
 	for _, part := range j.Segments {
@@ -74,6 +78,9 @@ func segmentSummary(j queueEntry) string {
 	}
 	if j.WorkerTarget > 0 {
 		text := fmt.Sprintf("%d parts · %d active · target %d · maximum %d", len(j.Segments), active, j.WorkerTarget, j.ConnectionLimit)
+		if j.AutomaticReason != "" {
+			text += " · " + j.AutomaticReason
+		}
 		if j.WorkerReason != "" {
 			text += " · " + j.WorkerReason
 		}
@@ -85,7 +92,9 @@ func newSegmentCard() *fyne.Container {
 	return container.NewVBox(widget.NewLabel("Part"), widget.NewProgressBar())
 }
 func newSegmentPanel() *fyne.Container {
-	return container.NewVBox(container.NewBorder(nil, nil, nil, widget.NewButton("Parts…", nil), widget.NewLabel("Parts")), container.NewGridWithColumns(4))
+	summary := widget.NewLabel("Parts")
+	summary.Truncation = fyne.TextTruncateEllipsis
+	return container.NewVBox(container.NewBorder(nil, nil, nil, widget.NewButton("Parts…", nil), summary), container.NewGridWithColumns(4))
 }
 func updateSegmentPanel(panel *fyne.Container, j queueEntry, show func()) {
 	if len(j.Segments) == 0 && j.State != "running" && j.State != "paused" {
@@ -156,7 +165,9 @@ func (v *downloadsView) updatePartDetails() {
 		return
 	}
 	if len(v.partDetails.Objects) != len(entry.Segments)+1 {
-		v.partDetails.Objects = []fyne.CanvasObject{widget.NewLabel("")}
+		summary := widget.NewLabel("")
+		summary.Wrapping = fyne.TextWrapWord
+		v.partDetails.Objects = []fyne.CanvasObject{summary}
 		for range entry.Segments {
 			detail := widget.NewLabel("")
 			detail.Wrapping = fyne.TextWrapWord

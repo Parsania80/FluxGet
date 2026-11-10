@@ -6,6 +6,8 @@ import (
 )
 
 type queueEntry struct {
+	AutomaticReason string               `json:"automatic_reason,omitempty"`
+	Activity        string               `json:"activity,omitempty"`
 	ID              int                  `json:"id"`
 	URL             string               `json:"url,omitempty"`
 	State           string               `json:"state"`
@@ -56,6 +58,16 @@ func downloadState(state string) string {
 }
 
 func (j queueEntry) displayState() string {
+	if j.State == "running" && j.Activity != "" {
+		switch j.Activity {
+		case "Checking transfer method":
+			return "Checking"
+		case "Verifying saved data":
+			return "Verifying"
+		default:
+			return "Waiting"
+		}
+	}
 	if j.State == "running" && j.Requests != nil && j.Requests.Active == 0 && j.Requests.Waiting > 0 {
 		return "Waiting"
 	}
@@ -117,6 +129,12 @@ func downloadRows(entries []queueEntry, history []job, category string) []downlo
 func downloadDetails(j queueEntry, unit string) string {
 	switch downloadState(j.State) {
 	case "Waiting":
+		if j.AutomaticReason != "" {
+			if strings.HasPrefix(j.AutomaticReason, "Waiting for the server") {
+				return j.AutomaticReason
+			}
+			return "Waiting for Automatic to admit this download"
+		}
 		return "Waiting for a download slot"
 	case "Paused":
 		if j.Progress != "" {

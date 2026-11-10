@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-func TestAutomaticBudgetsAcrossDownloadsAndRestart(t *testing.T) {
+func TestAutomaticConservativeAdmissionBudgetsAndRestart(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	binary := unifiedCLI(t)
 	payload := bytes.Repeat([]byte("budget-data"), 120000)
@@ -65,7 +65,9 @@ func TestAutomaticBudgetsAcrossDownloadsAndRestart(t *testing.T) {
 		unifiedRequest(t, q, desktopRequest{Operation: "add", Job: queueEntry{URL: url, Destination: filepath.Join(dir, []string{"first", "second", "third"}[i])}})
 	}
 	unifiedWait(t, q, func(j []queueEntry) bool {
-		return len(j) == 3 && j[2].Requests != nil && j[2].Requests.Active == 1 && j[0].Requests != nil && j[1].Requests != nil && j[0].Requests.Active+j[1].Requests.Active == 1 && j[0].Requests.Waiting+j[1].Requests.Waiting > 0
+		// Stage 3 starts one file; measured multi-file growth is exercised by
+		// the real-HTTP queue tests with an accelerated observation clock.
+		return len(j) == 3 && j[0].Requests != nil && j[0].Requests.Active == 1 && j[1].State == "queued" && j[2].State == "queued"
 	})
 	if peakAll.Load() > 2 || peakA.Load() > 1 || peakB.Load() > 1 {
 		t.Fatalf("request limits exceeded: global=%d a=%d b=%d", peakAll.Load(), peakA.Load(), peakB.Load())
@@ -78,7 +80,7 @@ func TestAutomaticBudgetsAcrossDownloadsAndRestart(t *testing.T) {
 	if err == nil || rejected.Management == nil || rejected.Management.Policy != policy {
 		t.Fatal("invalid policy was applied")
 	}
-	// A queued waiter is canceled even when every origin/global slot is held.
+	// A queued file can be paused before Automatic admits it.
 	if err := q.send("pause 2"); err != nil {
 		t.Fatal(err)
 	}

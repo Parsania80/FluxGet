@@ -157,6 +157,8 @@ func TestBatchControllerStartsPausesDeletesAndKeepsFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Batch concurrency is deterministic in Manual; Automatic starts one file.
+	s.ManagementMode = "manual"
 	s.MaxActive, s.Connections = 2, 1
 	s.Overrides["queue:1"], s.Overrides["queue:2"] = 16, 16
 	if err := s.save(); err != nil {

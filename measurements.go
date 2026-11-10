@@ -33,10 +33,13 @@ type transferMeasurements struct {
 	failures      atomic.Int64
 	httpErrors    atomic.Int64
 	workerChanges atomic.Int64
+	timeouts      atomic.Int64
+	origin        atomic.Pointer[string]
 	durations     [metricCount]atomic.Int64
 }
 type measurementSnapshot struct {
 	Retrying      int64 `json:"retrying"`
+	Timeouts      int64 `json:"timeouts"`
 	WorkerChanges int64 `json:"worker_changes"`
 	Accepted      int64 `json:"accepted_bytes"`
 	NetworkBytes  int64 `json:"network_bytes"`
@@ -63,7 +66,7 @@ func (m *transferMeasurements) snapshot() measurementSnapshot {
 	if m == nil {
 		return measurementSnapshot{}
 	}
-	return measurementSnapshot{Retrying: m.retrying.Load(), WorkerChanges: m.workerChanges.Load(), Accepted: m.accepted.Load(), NetworkBytes: m.networkBytes.Load(), Requests: m.requests.Load(), Failures: m.failures.Load(), HTTPErrors: m.httpErrors.Load(), BudgetWait: m.durations[metricBudgetWait].Load(), HeaderWait: m.durations[metricHeaderWait].Load(), NetworkRead: m.durations[metricNetworkRead].Load(), LimiterWait: m.durations[metricLimiterWait].Load(), Write: m.durations[metricWrite].Load(), Sync: m.durations[metricSync].Load(), Checkpoint: m.durations[metricCheckpoint].Load(), Verification: m.durations[metricVerification].Load(), RetryWait: m.durations[metricRetryWait].Load()}
+	return measurementSnapshot{Retrying: m.retrying.Load(), Timeouts: m.timeouts.Load(), WorkerChanges: m.workerChanges.Load(), Accepted: m.accepted.Load(), NetworkBytes: m.networkBytes.Load(), Requests: m.requests.Load(), Failures: m.failures.Load(), HTTPErrors: m.httpErrors.Load(), BudgetWait: m.durations[metricBudgetWait].Load(), HeaderWait: m.durations[metricHeaderWait].Load(), NetworkRead: m.durations[metricNetworkRead].Load(), LimiterWait: m.durations[metricLimiterWait].Load(), Write: m.durations[metricWrite].Load(), Sync: m.durations[metricSync].Load(), Checkpoint: m.durations[metricCheckpoint].Load(), Verification: m.durations[metricVerification].Load(), RetryWait: m.durations[metricRetryWait].Load()}
 }
 
 type measurementContextKey struct{}

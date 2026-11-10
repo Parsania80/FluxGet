@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"image/png"
 	"os"
+	"strings"
 	"testing"
 
 	"fyne.io/fyne/v2"
@@ -163,5 +164,26 @@ func TestRequestWaitingRowsHaveHonestFiltersAndActions(t *testing.T) {
 	v.list.Select(0)
 	if v.pause.Disabled() {
 		t.Fatal("request-waiting job cannot be paused")
+	}
+}
+
+func TestAdaptiveStatusReasonsAndActivities(t *testing.T) {
+	a := test.NewApp()
+	defer a.Quit()
+	w := a.NewWindow("Automatic")
+	defer w.Close()
+	v := newDownloadsView(a, w, &speedSettings{MaxActive: 5, Connections: 4, Overrides: map[string]int64{}}, nil, "")
+	w.SetContent(v.content)
+	v.management = &budgetSnapshot{Policy: requestPolicy{Mode: "automatic"}, FileTarget: 1, Draining: true, Status: "Stable", Reason: "Additional download did not improve total speed"}
+	v.entries = []queueEntry{{ID: 1, State: "running", Activity: "Verifying saved data"}, {ID: 2, State: "running", Activity: "Checking transfer method"}, {ID: 3, State: "running", Activity: "Waiting for retry"}, {ID: 4, State: "queued", AutomaticReason: "Waiting for the server cooldown; retry manually if requested"}}
+	v.refresh()
+	if !strings.Contains(v.summary.Text, "target 1 files") || !strings.Contains(v.summary.Text, "Letting active downloads finish") || !strings.Contains(v.managementNote.Text, v.management.Reason) {
+		t.Fatal("adaptive summary missing reason/draining", v.summary.Text)
+	}
+	if len(downloadRows(v.entries, nil, "Downloading")) != 0 || len(downloadRows(v.entries, nil, "Waiting")) != 2 {
+		t.Fatal("non-transfer work labeled downloading")
+	}
+	if !strings.Contains(downloadDetails(v.entries[3], "MB"), "server cooldown") {
+		t.Fatal("queued cooldown hidden")
 	}
 }
