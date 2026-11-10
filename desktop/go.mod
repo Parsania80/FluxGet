@@ -2,6 +2,10 @@ module github.com/Parsania80/FluxGet/desktop
 
 go 1.26.8
 
+require github.com/Parsania80/FluxGet v0.0.0
+
+replace github.com/Parsania80/FluxGet => ..
+
 require fyne.io/fyne/v2 v2.8.2
 
 require (

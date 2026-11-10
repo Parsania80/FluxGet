@@ -97,23 +97,25 @@ func startConfiguredQueue(executable string, maxActive, connections int, speedLi
 }
 
 type desktopRequest struct {
-	ID          int            `json:"id"`
-	Operation   string         `json:"operation"`
-	Job         queueEntry     `json:"job"`
-	MaxActive   int            `json:"max_active"`
-	Connections int            `json:"connections"`
-	Management  *requestPolicy `json:"management,omitempty"`
-	Action      string         `json:"action,omitempty"`
-	File        *replacement   `json:"file,omitempty"`
+	BrowserLater bool           `json:"browser_later,omitempty"`
+	ID           int            `json:"id"`
+	Operation    string         `json:"operation"`
+	Job          queueEntry     `json:"job"`
+	MaxActive    int            `json:"max_active"`
+	Connections  int            `json:"connections"`
+	Management   *requestPolicy `json:"management,omitempty"`
+	Action       string         `json:"action,omitempty"`
+	File         *replacement   `json:"file,omitempty"`
 }
 
 type desktopResponse struct {
-	Revision   uint64          `json:"revision"`
-	ID         int             `json:"id"`
-	JobID      int             `json:"job_id"`
-	Jobs       []queueEntry    `json:"jobs"`
-	Error      string          `json:"error"`
-	Management *budgetSnapshot `json:"management,omitempty"`
+	BrowserStage string          `json:"browser_stage,omitempty"`
+	Revision     uint64          `json:"revision"`
+	ID           int             `json:"id"`
+	JobID        int             `json:"job_id"`
+	Jobs         []queueEntry    `json:"jobs"`
+	Error        string          `json:"error"`
+	Management   *budgetSnapshot `json:"management,omitempty"`
 }
 
 func (q *queueClient) request(ctx context.Context, request desktopRequest) (desktopResponse, error) {

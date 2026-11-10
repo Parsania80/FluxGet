@@ -12,14 +12,15 @@ import (
 
 // Desktop requests are processed by the queue owner, never by transfer workers.
 type desktopRequest struct {
-	ID          int            `json:"id"`
-	Operation   string         `json:"operation"`
-	Job         queueJob       `json:"job"`
-	MaxActive   int            `json:"max_active"`
-	Connections int            `json:"connections"`
-	Management  *requestPolicy `json:"management,omitempty"`
-	Action      string         `json:"action,omitempty"`
-	File        *outputRemoval `json:"file,omitempty"`
+	BrowserLater bool           `json:"browser_later,omitempty"`
+	ID           int            `json:"id"`
+	Operation    string         `json:"operation"`
+	Job          queueJob       `json:"job"`
+	MaxActive    int            `json:"max_active"`
+	Connections  int            `json:"connections"`
+	Management   *requestPolicy `json:"management,omitempty"`
+	Action       string         `json:"action,omitempty"`
+	File         *outputRemoval `json:"file,omitempty"`
 }
 
 type outputRemoval struct {
@@ -29,20 +30,24 @@ type outputRemoval struct {
 }
 
 type desktopResponse struct {
-	Revision   uint64          `json:"revision"`
-	ID         int             `json:"id"`
-	JobID      int             `json:"job_id,omitempty"`
-	Jobs       []desktopEntry  `json:"jobs,omitempty"`
-	Error      string          `json:"error,omitempty"`
-	Management *budgetSnapshot `json:"management,omitempty"`
+	BrowserStage string          `json:"browser_stage,omitempty"`
+	Revision     uint64          `json:"revision"`
+	ID           int             `json:"id"`
+	JobID        int             `json:"job_id,omitempty"`
+	Jobs         []desktopEntry  `json:"jobs,omitempty"`
+	Error        string          `json:"error,omitempty"`
+	Management   *budgetSnapshot `json:"management,omitempty"`
 }
 
 func backupQueue(path string) error {
+	return backupQueueNamed(path, ".before-unified")
+}
+func backupQueueNamed(path, suffix string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path+".before-unified", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	f, err := os.OpenFile(path+suffix, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if errors.Is(err, os.ErrExist) {
 		return nil
 	}
@@ -82,6 +87,7 @@ func queueDestinationAvailable(q queueData, destination string, except int) erro
 }
 
 func desktopAdd(q *queueData, input queueJob, adopt bool) (int, error) {
+	input.IntakeID = "" // Only the browser transaction can create a pending job.
 	if !filepath.IsAbs(input.Destination) || filepath.Clean(input.Destination) != input.Destination {
 		return 0, errors.New("choose an absolute output path")
 	}

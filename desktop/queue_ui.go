@@ -6,6 +6,8 @@ import (
 )
 
 type queueEntry struct {
+	BrowserPending  bool                 `json:"browser_pending,omitempty"`
+	IntakeID        string               `json:"browser_intake_id,omitempty"`
 	AutomaticReason string               `json:"automatic_reason,omitempty"`
 	Activity        string               `json:"activity,omitempty"`
 	ID              int                  `json:"id"`

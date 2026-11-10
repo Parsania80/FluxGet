@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/Parsania80/FluxGet/browserbridge"
 	"image/color"
 	"net/url"
 	"os"
@@ -63,6 +64,12 @@ func main() {
 		return
 	}
 	view := newDownloadsView(a, w, settings, history, executable)
+	bridge, bridgeErr := browserbridge.Serve(view.browsers.handle)
+	if bridgeErr != nil {
+		view.browsers.note.SetText("Browser connection unavailable: " + bridgeErr.Error())
+	} else {
+		defer bridge.Close()
+	}
 	w.SetContent(view.content)
 	w.SetCloseIntercept(func() { view.close(func() { w.SetCloseIntercept(nil); w.Close() }) })
 	view.connect()
@@ -73,6 +80,7 @@ func main() {
 }
 
 type downloadsView struct {
+	browsers                                                 *browserIntegration
 	managementNote                                           *widget.Label
 	app                                                      fyne.App
 	window                                                   fyne.Window
@@ -106,6 +114,7 @@ type downloadsView struct {
 
 func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, history []job, executable string) *downloadsView {
 	v := &downloadsView{app: a, window: w, settings: settings, history: history, executable: executable, category: "All downloads", checked: map[string]bool{}, prompted: map[int]string{}, finishing: map[int]bool{}}
+	v.browsers = newBrowserIntegration(v)
 	v.status = widget.NewLabel("Preparing your downloads…")
 	v.status.Wrapping = fyne.TextWrapWord
 	v.summary = widget.NewLabel("")
@@ -260,6 +269,9 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 	downloads := container.NewBorder(top, nil, nil, nil, split)
 	settings.applyDownloads = v.applySettings
 	settingsPage := settings.page(w, func() { v.refresh() }, func() bool { return v.ready && !v.busy && !v.closing })
+	if scroll, ok := settingsPage.(*container.Scroll); ok {
+		scroll.Content = container.NewVBox(scroll.Content, v.browsers.page())
+	}
 	tabs := container.NewAppTabs(container.NewTabItemWithIcon("Downloads", theme.DownloadIcon(), downloads), container.NewTabItemWithIcon("Settings", theme.SettingsIcon(), settingsPage))
 	v.content = container.NewBorder(nil, container.NewPadded(container.NewBorder(nil, nil, nil, v.reconnect, v.status)), nil, nil, tabs)
 	categories.SetSelected("All downloads")
@@ -539,7 +551,13 @@ func (v *downloadsView) poll(q *queueClient) {
 	}()
 }
 func (v *downloadsView) work(task func(*queueClient) (desktopResponse, error), done func(desktopResponse)) {
+	v.workResult(task, done, nil)
+}
+func (v *downloadsView) workResult(task func(*queueClient) (desktopResponse, error), done func(desktopResponse), failed func(error)) {
 	if !v.ready || v.busy || v.closing {
+		if failed != nil {
+			failed(fmt.Errorf("FluxGet is busy or closing"))
+		}
 		return
 	}
 	q := v.client
@@ -549,12 +567,19 @@ func (v *downloadsView) work(task func(*queueClient) (desktopResponse, error), d
 		response, err := task(q)
 		fyne.Do(func() {
 			if v.client != q {
+				if failed != nil {
+					failed(fmt.Errorf("downloads service changed"))
+				}
 				return
 			}
 			v.busy = false
 			if err != nil {
 				v.status.SetText(err.Error())
-				dialog.ShowError(err, v.window)
+				if failed != nil {
+					failed(err)
+				} else {
+					dialog.ShowError(err, v.window)
+				}
 			} else {
 				v.accept(response)
 				if done != nil {

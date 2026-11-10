@@ -26,6 +26,9 @@ func (v *downloadsView) selectedRows() []downloadRow {
 }
 
 func batchAction(j queueEntry, action string) string {
+	if j.BrowserPending && action != "remove" {
+		return ""
+	}
 	state := strings.ToLower(downloadState(j.State))
 	switch action {
 	case "start":

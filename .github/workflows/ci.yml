@@ -27,6 +27,8 @@ jobs:
             printf 'Unformatted Go files:\n%s\n' "$unformatted"
             exit 1
           fi
+      - name: Browser extension logic
+        run: node --test extensions/core.test.cjs
       - name: Vet
         run: go vet ./...
       - name: Test with race detector

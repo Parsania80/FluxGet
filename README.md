@@ -17,7 +17,7 @@ FluxGet is a download manager written in Go. It helps you manage several downloa
 
 Automatic starts with one connection and may keep using one. If a server cannot provide safely validated file parts, FluxGet uses a single stream. Even when a server supports file parts, FluxGet must check that they all belong to the same file version.
 
-On Linux, Automatic also watches CPU, memory, and storage pressure and reduces work when needed. Manual controls are available in Settings. Browser download capture and using Wi-Fi and Ethernet together are planned.
+On Linux, Automatic also watches CPU, memory, and storage pressure and reduces work when needed. Manual controls are available in Settings. A Chrome browser-integration preview is available. Firefox and Opera packages are prepared but still need native testing. Using Wi-Fi and Ethernet together is planned.
 
 ## Build and open the desktop app
 
@@ -47,6 +47,16 @@ Use **Settings** to change the download folder, speed limits, or display units. 
 
 Removing an item from the list keeps its files. Deleting files is a separate action that requires confirmation.
 
+## Browser downloads
+
+See [browser setup](extensions/README.md) to build/register the bridge and load the extension. On the current development machine, the bridge is installed. Open `chrome://extensions`, turn on Developer mode, and **Load unpacked** from `~/Documents/FluxGet-Extensions/chrome` (a visible shortcut to the installed extension). Select the folder itself; you do not need to select a file inside it. In FluxGet **Settings → Browser downloads**, enable integration and your browser. Then enable your profile in the extension popup.
+
+Choose **Download automatically** for capture, or **Ask before downloading** to confirm each file. Approve website access once when enabling the profile, or choose **Enable capture for all websites** in the popup. Reload the page before retrying. New websites need no separate setup; the same capture rules apply across websites, with no special handling for individual download sites. To keep downloads from certain hosts in your browser, add them to **Settings → Browser downloads → Excluded hosts**; subdomains are included. You can disable capture globally, per browser/profile, or temporarily. You can also right-click a public link and choose **Send link to FluxGet**.
+
+Use a normal left-click to download with FluxGet. Hold **Ctrl + left-click** to keep that download in your browser; the browser's usual Ctrl-click navigation still applies. When an update adds shortcut permissions, finish capture setup once and reload the website. Chrome may briefly show a download during handoff; its canceled history entry is removed after FluxGet confirms ownership. Existing unrelated history is kept.
+
+Chrome capture, query-string/CDN redirects and browser fallback have passed a native test. Firefox Snap and Opera still need native verification. Logins, POST downloads, private browsing and uncertain requests stay in the browser. If capture is skipped, its reason appears near the top of the popup.
+
 ## Use the command line
 
 Build the CLI with `go build -o dist/fluxget .`, then run:
@@ -70,7 +80,7 @@ Resume uses the same output path and requires a valid saved checkpoint. The stan
 - Intended for public direct links. Website logins and authenticated browser downloads are not supported.
 - Resume depends on the saved data and server response; some downloads need a fresh start.
 - New downloads refuse existing output files. Incomplete data is kept after failures; final publication requires filesystem hard-link support.
-- Download metadata contains source URLs. Avoid links containing passwords or private tokens.
+- Download metadata saves complete source URLs, including CDN query parameters. These links may grant access or expire; keep metadata private. Diagnostic messages hide URLs. Expired links may require a fresh download link.
 - Power-loss recovery is not guaranteed. Full release and interactive desktop acceptance are still in progress.
 
 ## Development

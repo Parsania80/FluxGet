@@ -2,7 +2,7 @@
 
 FluxGet is a Go download manager inspired by IDM. The priorities are reliable transfers, understandable desktop controls, optional browser integration, and later experimental multi-interface downloading. It is also a learning and portfolio project for Go, concurrency, networking, persistence, and recovery.
 
-**Status — 2026-11-10:** Linux CLI and Fyne desktop prototypes are implemented. Automatic stages 1–4 are committed in `956a9e8`; stage 5 acceptance is next. Browser integration and multi-interface downloading are not implemented. The v0.1 engine release and detailed interactive desktop acceptance remain open.
+**Status — 2026-11-10:** Linux CLI and Fyne desktop prototypes are implemented. Automatic stages 1–4 are committed in `956a9e8`; broader stage 5 acceptance remains open. A Linux browser-integration preview now implements the native bridge, per-browser/profile settings, manual sending, and opt-in capture. Chrome 157 native handoff/fallback passed; Firefox Snap and Opera native acceptance remain open. Multi-interface downloading is not implemented. The v0.1 engine release and detailed interactive desktop acceptance remain open.
 
 This file describes current decisions and remaining work. [README.md](README.md) is the simple user guide, [BENCHMARKS.md](BENCHMARKS.md) records measured workloads, and [SESSION-LOG.md](SESSION-LOG.md) preserves development history. Implementation does not by itself mean release acceptance has passed.
 
@@ -15,20 +15,20 @@ Keep these priorities while continuing engine release verification alongside pro
 | 1 | CLI and desktop prototype baseline | ✅ Done | Sequential/parallel downloads, persistent queue, recovery, progress, and live limits |
 | 2 | Unified Downloads experience | 🔄 Current | Implemented and preview approved; detailed interactive acceptance remains |
 | 3 | Automatic download management | 🔄 Current | Stages 1–4 implemented; stage 5 compares Automatic with Manual |
-| 4 | Browser capability spike and bridge contract | ⬜ Todo | Verify Chrome, Firefox, and Opera behavior and package constraints |
-| 5 | Shared intake, native host, and manual Send to FluxGet | ⬜ Todo | One owner, private IPC, versioned protocol, idempotent requests |
-| 6 | Chrome capture and integration settings | ⬜ Todo | Public downloads, per-browser controls, safe handoff, fallback |
-| 7 | Firefox and Opera rollout | ⬜ Todo | Separate manifests, registration, and native compatibility evidence |
+| 4 | Browser capability spike and bridge contract | 🔄 Current | Chrome 157/native messaging tested; Firefox Snap portal exists but native acceptance is open; Opera absent |
+| 5 | Shared intake, native host, and manual Send to FluxGet | 🔄 Current | Implemented with private IPC and durable receipts; broader crash/setup/native acceptance remains |
+| 6 | Chrome capture and integration settings | 🔄 Current | Preview implemented; real popup consent, capture and master-disable fallback tested; normal setup/permission review remains |
+| 7 | Firefox and Opera rollout | ⬜ Todo | Manifests and shared implementation prepared; package-specific native verification is pending |
 | 8 | Browser packaging and acceptance | ⬜ Todo | Stable extension IDs, distribution, repair/uninstall, privacy, crash tests |
 | 9 | Remaining v0.1 engine release checks | ⬜ Todo | Resource bounds, packaged artifacts, native environments, evidence review |
 | 10 | Multi-interface experiment | ⬜ Todo | Prove routing, correct output, failover, and benefit on independent uplinks |
 | 11 | Authenticated browser downloads | ⬜ Todo | Separate consent, credential, request-replay, and recovery design |
 
-### ➡️ Current: #3 — Automatic download management
+### ➡️ Current: #6 — Chrome browser integration preview
 
-### ⏭️ Next: #3 stage 5 — Full adaptive acceptance
+### ⏭️ Next: #6–7 — Normal browser setup and Firefox/Opera native acceptance
 
-**Next concrete work:** Run repeatable Automatic-versus-Manual comparisons across useful and unhelpful parallelism, changing bandwidth, user limits, origin restrictions, CPU quotas, low memory, and slow destination/checkpoint storage. Measure throughput, requests, variability, resource cost, fairness, and recovery; complete native desktop review before claiming the default experience accepted.
+**Next concrete work:** Load/approve the unpacked Chrome extension through the normal browser setup UI, approve one-time all-website access and verify a public download, then test Firefox Snap portal consent/registration and an installed Opera version. Broader browser crash/security/distribution acceptance and Automatic stage 5 comparisons remain open alongside this user-selected browser work.
 
 ## Product scope and release boundaries
 
@@ -45,7 +45,7 @@ The first target is **Linux/amd64**. Ubuntu 26.04.1 with Go 1.26.8 has local run
 
 Desktop and browser work precede multi-interface development without expanding the v0.1 engine gate. There are no fixed release dates or claims of complete IDM parity, guaranteed acceleration, or uninterrupted browsing.
 
-Outside current scope: website login automation, cookies/credential storage, secret-bearing links, media extraction, streaming assembly, torrents, FTP/SFTP, cloud sync, remote administration, and automatic updates. No hosted service, database server, account system, or public control API is required. Scheduled queues, mirrors, notifications, metered-network controls, and a background service remain optional future work with a demonstrated need.
+Outside current scope: website login automation, cookies/header credential storage, media extraction, streaming assembly, torrents, FTP/SFTP, cloud sync, remote administration, and automatic updates. Operator-approved query-string/CDN URLs are supported without cookie/header replay; expiry and single-use recovery are not guaranteed. No hosted service, database server, account system, or public control API is required. Scheduled queues, mirrors, notifications, metered-network controls, and a background service remain optional future work with a demonstrated need.
 
 ## Tech Stack Lock
 
@@ -53,9 +53,12 @@ Outside current scope: website login automation, cookies/credential storage, sec
 |---|---|---|
 | Engine and CLI | Go 1.26 baseline; standard library | Root module `github.com/Parsania80/FluxGet` |
 | Desktop | Go 1.26.8; Fyne v2.8.2 and pinned dependencies | Separate `desktop/go.mod` and `desktop/go.sum`; no replacement UI framework |
-| Persistence | Versioned local JSON | Queue schema 2, current checkpoint version 4; no database needed |
-| Browser extensions, planned | Plain JavaScript, HTML, CSS, JSON; official WebExtensions APIs | Manifest V3 where supported, browser-specific background/manifest adapters; no initial framework |
-| Native bridge, planned | Go standard library, native messaging, private local IPC | Browser-specific registration and explicit extension-ID allowlists |
+| Persistence | Versioned local JSON | Queue schemas 1/2 remain readable; first browser handoff uses backed-up schema 3; checkpoints remain v4; no database |
+| Browser extensions | Plain JavaScript, HTML, CSS, JSON; official WebExtensions APIs | Manifest V3 where supported, browser-specific background/manifest adapters; no initial framework |
+| Native bridge | Go standard library, native messaging, private local IPC | Browser-specific registration and explicit extension-ID allowlists |
+| Development packaging | Python 3 standard library | Copy extension assets and register selected native hosts; no Python dependency in the running Go app/extension |
+
+Packaging helpers use the Python standard library already available on the development host. Plain shell would make JSON/path handling more fragile; a separate Go packaging command would need another build step for simple file generation. The helpers add no third-party library or running-app dependency. Native host and extension runtime remain Go and plain JavaScript respectively.
 
 New dependencies require a documented need and comparison. JSON was selected over SQLite to keep dependencies small; locking, validation, and atomic replacement remain the application's responsibility. Fyne was selected after a working desktop proof of concept. Keep the current source layout until a concrete boundary justifies restructuring.
 
@@ -90,7 +93,7 @@ Settings are saved only after scheduler acknowledgment; a settings-write failure
 | `desktop/assets/`, `packaging/linux/` | Embedded app icon and Linux launcher template |
 | `.github/workflows/ci.yml` | Formatting, tests, vet, desktop/Linux builds, CLI cross-builds |
 
-The engine currently lives in the root `main` package. A future `cmd/` and `internal/` split is optional, not implemented architecture. Proposed browser source placement must be finalized during bridge design.
+The engine currently lives in the root `main` package. A future `cmd/` and `internal/` split is optional, not implemented architecture. The browser preview uses `browserbridge/`, `cmd/fluxget-native-host/`, `extensions/`, and the two Python packaging helpers; these do not restructure the transfer engine.
 
 ## Current behavior and correctness contracts
 
@@ -105,13 +108,13 @@ The engine currently lives in the root `main` package. A future `cmd/` and `inte
 
 ### Persistence and recovery
 
-- Queue schema 2 reads version-one queues. Checkpoint v4 records verified offsets/hashes within unfinished parts; versions 1–3 remain readable. Older executables cannot read all upgraded formats. Keep formats versioned and validate paths, identity, ranges, sizes, and partial availability before reuse.
+- Queue reads schemas 1–3. Without browser receipts it keeps schema 2; the first accepted browser handoff backs up `queue.json.before-browser` and writes schema 3. Old CLI builds cannot read it, so retain paired current executables and the backup. Checkpoint v4 records verified offsets/hashes within unfinished parts; versions 1–3 remain readable. Older executables cannot read all upgraded formats. Keep formats versioned and validate paths, identity, ranges, sizes, and partial availability before reuse.
 - Synchronize partial data before publishing metadata: write temporary JSON in the metadata directory, sync and close it, then replace the record. Failed updates must not claim unsaved progress. Locks prevent duplicate FluxGet writers; unrelated programs can still race filesystem changes.
 - Parallel recovery requires a strong validator and validated ranges. Sequential recovery can instead compare the saved prefix with one fresh known-length response before appending; this redownloads the prefix and does not authenticate the source.
 - Prefix checkpoints occur after roughly 1 MiB or two seconds while data arrives, plus clean interruption. A crash may lose work since the last safe checkpoint. Unrecorded prefixes in older checkpoints cannot be recovered retroactively.
 - Explicit `-resume` can verify/reconcile interrupted final publication using its completed-file digest and identity. Older records without publication state require manual inspection. Startup-wide reconciliation is not complete.
 - A crash before the first record can leave an undiscovered partial file. Process-kill tests do not establish power-loss durability; that guarantee remains out of scope until separately specified and tested.
-- Queue/history metadata contains source URLs. Do not store authentication secrets or use credential-bearing links; future authenticated workflows need a separate design. Never execute downloaded content or shell commands derived from it.
+- Queue/checkpoint/history metadata contains complete source URLs, including approved CDN query tokens; keep metadata private. Human-readable browser failure diagnostics redact URLs. Cookie/header credential storage and authenticated workflows need a separate design. Never execute downloaded content or shell commands derived from it.
 
 ### Lifecycle and file deletion
 
@@ -219,15 +222,15 @@ Owned buffers allocate lazily after reservation, wait cancelably if exhausted, a
 - [ ] Kill/reopen during retirement and checkpoint publication; verify exact output, no duplicate writers, missing bytes, falsely complete parts, leaked leases, or silently resumed paused jobs.
 - [ ] Complete native Settings/Downloads review and document limits before claiming the default Automatic experience accepted.
 
-## Browser integration — planned
+## Browser integration — development preview
 
 **Goal:** Capture supported browser downloads into the same Downloads list when enabled, with independent Chrome/Firefox/Opera controls and a reliable browser fallback. Begin on Linux/amd64 after the selected Automatic foundations and desktop acceptance.
 
-**Selected architecture:** WebExtension -> browser native messaging -> small Go host -> private local IPC -> single desktop/scheduler owner. Linux IPC is planned as a user-owned Unix socket with restrictive permissions and peer checks; other OS adapters require verification. The extension owns browser download operations; the desktop owns jobs and integration policy. Native hosts must not start competing queue owners.
+**Implemented architecture:** WebExtension -> browser native messaging -> small Go host -> private local IPC -> single desktop/scheduler owner. Linux uses a private 0700 runtime directory, 0600 Unix socket, same-UID peer checks and exclusive ownership; other OSes return Unsupported. The extension owns browser download operations; the desktop owns jobs and integration policy. Native hosts must not start competing queue owners.
 
 Native messaging avoids a public listener and gives explicit extension identities, but needs per-browser/package registration. Localhost HTTP is an alternative only if a documented environment makes native messaging unsuitable; it adds port/authentication/origin/lifecycle work. A custom URL scheme can support explicit links but cannot alone provide general capture.
 
-### Planned settings
+### Settings and consent
 
 | Control | Behavior |
 |---|---|
@@ -239,7 +242,23 @@ Native messaging avoids a public listener and gives explicit extension identitie
 | Exceptions | Per-site/file-type rules; exclusions win; distinguish initiating site from download host |
 | Private browsing | Off; separate permission/consent and tested privacy behavior required before support |
 
-Effective readiness requires master, browser, profile consent, and extension readiness. The host also validates policy; stale/unknown/disconnected state leaves new downloads in the browser. Define changes during pending handoff explicitly. Manual sending works when only automatic capture mode is off; master/browser disable blocks all extension intake.
+Effective readiness requires master, browser, profile consent, and extension readiness. Normal capture setup requests all HTTP/HTTPS website permissions once, with excluded download hosts (including subdomains) managed in desktop Settings; users do not maintain a per-site allowlist. Website access remains an explicit browser approval, and old limited grants remain until approved. Manual-only profile setup requires no website monitoring permission. The host also validates policy; stale/unknown/disconnected state leaves new downloads in the browser. Define changes during pending handoff explicitly. Manual sending works when only automatic capture mode is off; master/browser disable blocks all extension intake.
+
+### Implementation and native evidence (2026-11-10)
+
+- `browserbridge/` defines strict version-1 framing, 64 KiB messages, URL/filename checks, persisted master/browser/profile policy, exclusions, and bounded Linux IPC. `cmd/fluxget-native-host` validates the pinned browser extension identity and relays to the existing owner; it can activate the sibling desktop when closed, without creating a separate scheduler. Closed-app activation still needs broader native acceptance.
+- `queue_browser.go` persists up to 2,048 request receipts in schema 3. Prepare creates one paused job without network activity; only confirmed cancellation activates it. Replayed IDs cannot create duplicates or resume a user-paused job, and receipts survive list removal. Unconfirmed jobs cannot be started through normal Resume. Expired/disabled/Download-later handoffs remain paused after confirmed cancellation.
+- `desktop/browser_integration.go` adds master and independent Chrome/Firefox/Opera controls, ask/automatic/manual modes, excluded hosts, profile consent counts/disconnect, destination prompts and native error responses. It uses the same queue client and owner, with one browser prompt at a time.
+- `extensions/src/` is shared plain JavaScript/CSS/HTML with separate MV3 manifests/background adapters. The pinned Chromium ID is `phfanjlpchehjklocnblfjdhgmlcjoaa`; Firefox uses `fluxget@parsania80.github.io`. The popup exposes connection/profile consent, one-time all-website access/removal, limited-grant readiness, a 15-minute bypass and pending-handoff recovery. Manual sending uses the link context menu. Exclusions remain in the existing desktop policy rather than a separate popup list.
+- Capture observes only explicitly granted sites through optional `webRequest`/host permissions. It requires one matching original-to-final GET trace, observed request headers with no Cookie/Authorization/Range, current site/profile policy, a non-private active browser item marked safe, and an HTTP/HTTPS URL without embedded credentials/fragments. Operator-approved query-string/CDN support preserves the final URL exactly through native transport, durable receipt validation and engine intake. Diagnostics redact URLs; local transfer metadata retains them. The popup displays specific fallback reasons near the top. It stores only credential-presence booleans, never cookie/header values. Unknown, cached, ambiguous, partially observed, POST, warning/scan-pending and unsupported requests stay in the browser. Site grants are checked again before cancellation. Capture is bounded to four concurrent attempts and 32 recoverable client records.
+- The extension persists handoff intent/stages before cancellation. Before cancellation failures resume the browser; after cancellation it retries the same accepted request rather than making another copy. Missing browser state is not assumed canceled. A startup promise prevents concurrent native messages from creating competing profile identities.
+- After active ownership is acknowledged, a durable client cleanup stage permits erasing only that handoff's interrupted/USER_CANCELED history item. Cleanup retries never recreate/activate a transfer, and missing browser state during confirmed cleanup is safe to reconcile. Rejected, user-canceled, bypassed and unrelated history stays intact. A brief initial browser entry remains possible with download-event capture; no global download-UI suppression or history sweep is used.
+- Optional `scripting` permission enables an isolated document-start/all-frame Ctrl+left-click observer on granted HTTP/HTTPS pages. Trusted gestures create single-use, tab/link/redirect-scoped bypass tickets in session storage, including new-tab opener matching. It does not prevent or rewrite native click navigation. Tickets and used-ID tombstones are capped at 32 (30 seconds for links, five seconds for buttons); opener associations are capped at 64 for 30 seconds. Existing profiles finish shortcut setup via the same website-permission action and reload their pages. Restricted browser pages and delayed/custom site flows retain the temporary popup bypass alternative.
+- Go race tests cover private/exclusive IPC and shutdown, malformed/bounded frames, policy save rollback/consent, receipt replay/restart/list removal, no transfer before cancellation, expiry, Download later, and actual output. Node tests cover handoff/fallback, disable and site-revocation races, lost acknowledgments, unavailable/completed browser items, credential/POST/redirect rejection, acceptance removal, identity races and manual-link recovery. CI runs the Node suite without npm dependencies.
+- Real **Google Chrome 157.0.8103.50 on Linux** passed an isolated-profile native test: load the actual extension, pair through its real popup, pause/cancel a browser download through a query-bearing redirect, activate one existing-scheduler job with the exact final query, compare exact output, verify an excluded host stays in Chrome despite all-site access, then disable integration and verify the next file completes in Chrome. A separate Ask first run accepted exactly one destination prompt. Follow-up Chrome acceptance verifies a trusted Ctrl+left-click through a query-bearing redirect stays in the browser (including its new-tab path), ordinary capture erases only its confirmed canceled history item, and three browser-managed history entries/files remain intact. Shortcut/content-script permissions are pre-granted only in the isolated test profile. The updated test manifest pre-grants all-site capture only in the disposable test profile; ordinary optional-permission approval and normal installation still require operator review. Test files/profiles/configuration are isolated; sandboxing is retained. Popup/Settings renders were inspected.
+- Installed Firefox is **158.0.1 Snap**; the WebExtensions portal is present, but host launch/consent and capture are not yet natively verified. Opera is not installed. Shared source and generated folders do not establish native support for either. Store signing/distribution, broader browser failures/crashes, private browsing and authenticated inputs remain open.
+
+Build, registration, setup, limits and uninstall instructions are in [extensions/README.md](extensions/README.md). Generated folders live under ignored `dist/extensions/`; the installer registers only explicitly selected browsers and does not install extensions or edit browser profile databases. Checkpoints and current Automatic behavior are unchanged.
 
 ### Delivery order and handoff contract
 
@@ -255,9 +274,9 @@ Effective readiness requires master, browser, profile consent, and extension rea
 
 Start with proven replayable public HTTP/HTTPS GET downloads and user-selected public links. An HTTP URL or download event alone does not prove method, public accessibility, or replayability; unknown cases stay in the browser.
 
-Leave POST/form bodies, blob/data URLs, generated files, authenticated/cookie-dependent downloads, expiring or single-use secret links, protected downloads, and streaming media in the browser. Initial permissions cover only demonstrated needs such as downloads, native messaging, storage, and context menus. No cookies, arbitrary headers, broad request interception, or browsing-history transfer; additional site permissions require justification and consent. Redact query strings and sensitive URL components; a public-looking URL is not proof of no secret.
+Leave POST/form bodies, blob/data URLs, generated files, authenticated/cookie-dependent downloads, protected downloads, and streaming media in the browser. Query-bearing GET links are now accepted under the same observed-request/security checks; expiry, single-use behavior and successful replay/resume are not guaranteed. Initial permissions cover only demonstrated needs such as downloads, native messaging, storage, and context menus. No cookies, arbitrary headers, request modification, or browsing-history transfer; all-site observation requires browser approval. Redact complete URLs from diagnostics; a public-looking URL is not proof of no secret.
 
-Do not bypass browser malware/security blocks, enterprise policy, or certificate failures. If a security decision cannot be preserved, leave that download class in the browser. FluxGet must not imply it inherits browser scanning guarantees. Later authenticated support must design consent, scoped headers/cookies, redirect-origin restrictions, signed URLs, secret storage/redaction/expiry, and recovery first.
+Do not bypass browser malware/security blocks, enterprise policy, or certificate failures. If a security decision cannot be preserved, leave that download class in the browser. FluxGet must not imply it inherits browser scanning guarantees. Later authenticated support must design consent, scoped headers/cookies, redirect-origin restrictions, secure credential storage/expiry, and recovery first.
 
 Browser acceptance remains open:
 
@@ -342,7 +361,7 @@ Queue commands include `add URL OUTPUT`, `import OUTPUT`, `list`, `inspect ID`, 
 
 ### Local preview record
 
-At the last installation check on 2026-11-10, `~/.local/opt/fluxget` contained the paired stage-3 executables corresponding to `a641a49`, opened through `fluxget-preview`. Backup: `~/.local/state/fluxget/backups/20261110-091846-live-speed-pacing`. The stage-4 refresh stopped at preflight because a real download was active, before changing any runtime state. Stage-4 builds were prepared in `/tmp`, which is temporary; rebuild from the committed source for a later paired refresh. Do not describe stage 4 as installed from the source commit alone.
+On 2026-11-10, refreshed `~/.local/opt/fluxget` with the verified current engine/desktop pair (including stage 4 and the uncommitted browser preview), three companion native executables, and generated extension folders. Backup: `~/.local/state/fluxget/backups/20261110-131848-browser-integration`. Normal close/reopen preserved saved checkpoint/settings hashes; the existing completed job stayed inactive. Native-host registrations were installed for Chrome and Firefox; Opera is absent. A framed request through the installed Chrome host reached the running desktop and returned disabled/ask, confirming the default opt-in state. Installed hashes match the tested builds. No extension was loaded into the operator's normal profiles and no download was started. The real queue remains schema 2 until its first browser handoff; that transaction backs up and upgrades it to schema 3. Refreshed the installed pair/hosts/extensions again for approved query-string/CDN support at 14:51; backup `~/.local/state/fluxget/backups/20261110-145136-browser-integration`. Installed hash checks and a synthetic query-bearing request reaching desktop policy validation passed; settings/checkpoints and existing downloads stayed unchanged.
 
 ## References
 

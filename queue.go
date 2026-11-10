@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/Parsania80/FluxGet/browserbridge"
 )
 
 type queueProgress struct {
@@ -418,6 +420,9 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 			q.Jobs[i].Message = ""
 			if result.err != nil && state == "failed" {
 				q.Jobs[i].Message = result.err.Error()
+				if q.Jobs[i].IntakeID != "" {
+					q.Jobs[i].Message = browserbridge.Diagnostic(q.Jobs[i].Message)
+				}
 				if len(q.Jobs[i].Message) > 4096 {
 					q.Jobs[i].Message = q.Jobs[i].Message[:4096]
 				}
@@ -427,7 +432,11 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 				continue
 			}
 			if result.err != nil && state == "failed" {
-				fmt.Fprintf(output, "Job %d failed: %v\n", result.id, result.err)
+				message := result.err.Error()
+				if q.Jobs[i].IntakeID != "" {
+					message = browserbridge.Diagnostic(message)
+				}
+				fmt.Fprintf(output, "Job %d failed: %s\n", result.id, message)
 			} else {
 				fmt.Fprintf(output, "Job %d: %s\n", result.id, state)
 			}
@@ -443,6 +452,11 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 				changed := false
 				if requestErr == nil {
 					switch req.Operation {
+					case "browser-prepare", "browser-status", "browser-abort", "browser-activate":
+						response.JobID, changed, requestErr = browserQueueOperation(&q, path, req, clock())
+						if receipt, ok := q.BrowserReceipts[req.Job.IntakeID]; ok {
+							response.BrowserStage = receipt.Stage
+						}
 					case "workers":
 						i := find(req.Job.ID)
 						control := workerControls[req.Job.ID]
@@ -464,6 +478,10 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 							break
 						}
 						j := &q.Jobs[i]
+						if pendingBrowserJob(q, *j) && req.Action != "remove" {
+							requestErr = errors.New("browser handoff is pending; complete it in the extension or remove this entry")
+							break
+						}
 						if requested[j.ID] != "" {
 							requestErr = errors.New("download is still stopping; try again shortly")
 							break
@@ -630,6 +648,7 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 				response.Management = &management
 				for i := range response.Jobs {
 					entry := &response.Jobs[i]
+					entry.BrowserPending = pendingBrowserJob(q, entry.queueJob)
 					if w := resources.storage[entry.ID]; w != nil {
 						view := w.view
 						entry.Storage = &view
@@ -798,6 +817,10 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 				i := find(id)
 				if e != nil || i < 0 {
 					fmt.Fprintln(output, "Unknown job ID.")
+					continue
+				}
+				if pendingBrowserJob(q, q.Jobs[i]) && command != "remove" {
+					fmt.Fprintln(output, "Complete the browser handoff in the extension before starting this job.")
 					continue
 				}
 				if command == "restart" || command == "discard" {

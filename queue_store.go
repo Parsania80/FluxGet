@@ -20,6 +20,7 @@ type cleanupIntent struct {
 }
 
 type queueJob struct {
+	IntakeID       string         `json:"browser_intake_id,omitempty"`
 	ID             int            `json:"id"`
 	URL            string         `json:"url"`
 	Destination    string         `json:"destination"`
@@ -34,9 +35,10 @@ type queueJob struct {
 	SavedProgress  *float64       `json:"saved_progress,omitempty"`
 }
 type queueData struct {
-	Version int        `json:"version"`
-	NextID  int        `json:"next_id"`
-	Jobs    []queueJob `json:"jobs"`
+	BrowserReceipts map[string]browserReceipt `json:"browser_receipts,omitempty"`
+	Version         int                       `json:"version"`
+	NextID          int                       `json:"next_id"`
+	Jobs            []queueJob                `json:"jobs"`
 }
 
 func queuePath() (string, error) {
@@ -78,12 +80,26 @@ func loadQueue(path string) (queueData, error) {
 	if err = dec.Decode(&q); err != nil {
 		return q, err
 	}
-	if dec.Decode(new(any)) != io.EOF || (q.Version != 1 && q.Version != 2) || q.NextID < 1 {
+	if dec.Decode(new(any)) != io.EOF || (q.Version != 1 && q.Version != 2 && q.Version != 3) || q.NextID < 1 {
 		return q, errors.New("invalid queue metadata")
 	}
 	ids := make(map[int]bool)
+	if len(q.BrowserReceipts) > 2048 || len(q.BrowserReceipts) > 0 && q.Version != 3 {
+		return q, errors.New("invalid browser handoff history")
+	}
+	for key, r := range q.BrowserReceipts {
+		if !validIntakeID(key) || r.JobID < 1 || r.JobID >= q.NextID || r.Expires <= 0 || (r.Stage != "pending" && r.Stage != "active" && r.Stage != "aborted") || (r.Kind != "capture" && r.Kind != "link") {
+			return q, errors.New("invalid browser receipt")
+		}
+	}
 	destinations := make(map[string]bool)
 	for _, j := range q.Jobs {
+		if j.IntakeID != "" {
+			r, ok := q.BrowserReceipts[j.IntakeID]
+			if !ok || r.JobID != j.ID || q.Version != 3 || r.Stage == "pending" && j.State != "paused" {
+				return q, errors.New("invalid browser job")
+			}
+		}
 		if j.SavedProgress != nil && (*j.SavedProgress < 0 || *j.SavedProgress > 1) {
 			return q, errors.New("invalid saved progress")
 		}
@@ -125,7 +141,12 @@ func loadQueue(path string) (queueData, error) {
 }
 
 func saveQueue(path string, q queueData) error {
-	q.Version = 2
+	if q.Version < 3 {
+		q.Version = 2
+	}
+	if len(q.BrowserReceipts) > 0 {
+		q.Version = 3
+	}
 	data, err := json.Marshal(q)
 	if err != nil {
 		return err

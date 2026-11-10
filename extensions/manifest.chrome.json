@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "FluxGet Browser Integration",
+  "version": "0.1.0",
+  "description": "Send public file downloads to FluxGet with per-browser and per-site controls.",
+  "permissions": [
+    "downloads",
+    "nativeMessaging",
+    "storage",
+    "contextMenus",
+    "alarms"
+  ],
+  "optional_permissions": [
+    "webRequest",
+    "scripting"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "FluxGet",
+    "default_icon": {
+      "32": "icon.png"
+    }
+  },
+  "incognito": "not_allowed",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAneQUOjiAERXCu/2QydniuDTw8SdLCGJ0Ov9WVJnihx0iNl5iJi0fPc5PlDE0wxNwtYVweoRtzH5+OeDT8ADjShaRiq07rCjDUg0hPHNjsp3K9HFwb/Wo2iRvYrhyQBpsTGBP09Rz+oCaE2ynsU3FoKljKLNAekaw89OR9c0spQZatvhpul/mTa4YclAEL+ZcMZtUa9v5YbijRrUhybTl3NmQoS2073C6OovUOhBKXC9cwkhCaMbLaVsj8DuIdB8ZJ+a7wWNzYtIqeZeW6akPoypVSclV95AqSTvO7BSVKbXv1KczncdySnbNPMymzN3qDodn9w1LCXl/e+LW2yatowIDAQAB",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "minimum_chrome_version": "120",
+  "icons": {
+    "128": "icon.png"
+  }
+}
