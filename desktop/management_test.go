@@ -187,3 +187,60 @@ func TestAdaptiveStatusReasonsAndActivities(t *testing.T) {
 		t.Fatal("queued cooldown hidden")
 	}
 }
+
+func TestHardwareObservationsStayRuntimeOnlyAndRender(t *testing.T) {
+	a := test.NewApp()
+	defer a.Quit()
+	w := a.NewWindow("Hardware observations")
+	defer w.Close()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	s, err := loadSpeedSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := s.page(w, nil, func() bool { return true })
+	w.SetContent(page)
+	w.Resize(fyne.NewSize(1100, 850))
+	cpu, rss := 42.0, uint64(64<<20)
+	state := &budgetSnapshot{Hardware: &hardwareSnapshot{CPUPercent: &cpu, RSS: &rss, CPUState: "Measured", MemoryState: "Measured"}, Buffers: &bufferSnapshot{Transfer: 65536, Hash: 65536, MaximumTransfer: 128 << 20, MaximumHash: 32 << 20}}
+	text := hardwareDescription(state)
+	if !strings.Contains(text, "42% of available capacity") || !strings.Contains(text, "Engine memory: 67.1 MB") || !strings.Contains(text, "Hash buffers") {
+		t.Fatal(text)
+	}
+	if text := hardwareDescription(&budgetSnapshot{Hardware: &hardwareSnapshot{CPUState: "Unknown", MemoryState: "Unknown"}}); strings.Contains(text, "0%") || !strings.Contains(text, "Unknown") {
+		t.Fatal(text)
+	}
+	s.hardwareNote.SetText(text)
+	data, err := json.Marshal(s)
+	if err != nil || strings.Contains(string(data), "hardware") || strings.Contains(string(data), "RSS") || strings.Contains(string(data), "CPU") {
+		t.Fatalf("runtime data persisted: %s %v", data, err)
+	}
+	if path := os.Getenv("FLUXGET_HARDWARE_SCREENSHOT"); path != "" {
+		var open func(fyne.CanvasObject)
+		open = func(o fyne.CanvasObject) {
+			switch o := o.(type) {
+			case *container.Scroll:
+				open(o.Content)
+			case *fyne.Container:
+				for _, child := range o.Objects {
+					open(child)
+				}
+			case *widget.Accordion:
+				o.Open(0)
+			}
+		}
+		open(page)
+		page.Refresh()
+		w.Resize(fyne.NewSize(1100, 1000))
+		w.Show()
+		f, err := os.Create(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = png.Encode(f, w.Canvas().Capture())
+		f.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}

@@ -226,7 +226,7 @@ func resumeDownloadWithLimit(ctx context.Context, client *http.Client, destinati
 			fmt.Fprintf(progress, "Verifying %d saved bytes against the server…\n", c.Completed)
 		}
 		remoteHash := sha256.New()
-		if _, err := io.CopyN(remoteHash, response.Body, c.Completed); err != nil {
+		if _, err := copyTransferN(ctx, remoteHash, response.Body, c.Completed, true); err != nil {
 			return 0, fmt.Errorf("verify saved data: %w", err)
 		}
 		if !strings.EqualFold(hex.EncodeToString(remoteHash.Sum(nil)), c.PrefixSHA256) {
@@ -254,7 +254,7 @@ func resumeDownloadWithLimit(ctx context.Context, client *http.Client, destinati
 	tracker.segment, tracker.segments = segments.part(0), segments
 	tracker.checkpoint = checkpointProgressObserved(ctx, path, partial, &c, hash, c.Completed)
 	tracker.report()
-	written, err := io.Copy(tracker, io.LimitReader(response.Body, *c.Total-c.Completed+1))
+	written, err := copyTransfer(ctx, tracker, io.LimitReader(response.Body, *c.Total-c.Completed+1), false)
 	tracker.report()
 	totalWritten := c.Completed + written
 	if err != nil || totalWritten != *c.Total {

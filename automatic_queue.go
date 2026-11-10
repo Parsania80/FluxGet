@@ -12,21 +12,23 @@ import (
 
 // All fields belong to the queue owner; none are persisted in queue/checkpoints.
 type automaticController struct {
-	policy        adaptivePolicy
-	sampler       observationSampler
-	generation    uint64
-	files         int
-	candidate     int // zero means a file admission trial
-	trial         bool
-	settling      bool
-	fileJoined    bool
-	settleAt      time.Time
-	previous      map[int]measurementSnapshot
-	reason        string
-	status        string
-	limits        liveSpeedConfig
-	limitsKnown   bool
-	staticOverall int64
+	policy          adaptivePolicy
+	sampler         observationSampler
+	generation      uint64
+	files           int
+	candidate       int // zero means a file admission trial
+	trial           bool
+	settling        bool
+	fileJoined      bool
+	settleAt        time.Time
+	previous        map[int]measurementSnapshot
+	reason          string
+	status          string
+	limits          liveSpeedConfig
+	limitsKnown     bool
+	staticOverall   int64
+	resourceBlocked bool
+	resourceReason  string
 }
 
 type automaticJob struct {
@@ -190,6 +192,12 @@ func (a *automaticController) tick(now time.Time, generation uint64, maximum int
 		}
 		a.resetWindow(now, jobs, generation)
 		return update
+	}
+	if a.resourceBlocked {
+		a.status = "Backing off"
+		a.reason = a.resourceReason
+		a.resetWindow(now, jobs, generation)
+		return nil
 	}
 	if len(jobs) == 0 {
 		a.files = 1

@@ -170,13 +170,15 @@ type requestPolicy struct {
 	PerOrigin int    `json:"per_origin"`
 }
 type budgetSnapshot struct {
-	Policy     requestPolicy `json:"policy"`
-	Active     int           `json:"active"`
-	Waiting    int           `json:"waiting"`
-	FileTarget int           `json:"file_target,omitempty"`
-	Draining   bool          `json:"draining,omitempty"`
-	Status     string        `json:"status,omitempty"`
-	Reason     string        `json:"reason,omitempty"`
+	Policy     requestPolicy     `json:"policy"`
+	Active     int               `json:"active"`
+	Waiting    int               `json:"waiting"`
+	FileTarget int               `json:"file_target,omitempty"`
+	Draining   bool              `json:"draining,omitempty"`
+	Status     string            `json:"status,omitempty"`
+	Reason     string            `json:"reason,omitempty"`
+	Hardware   *hardwareSnapshot `json:"hardware,omitempty"`
+	Buffers    *bufferSnapshot   `json:"buffers,omitempty"`
 }
 type jobBudgetSnapshot struct {
 	Active   int  `json:"active"`
@@ -188,4 +190,44 @@ type measurementSnapshot struct {
 	Requests    int64 `json:"requests"`
 	LimiterWait int64 `json:"limiter_wait_ns"`
 	BudgetWait  int64 `json:"budget_wait_ns"`
+}
+
+// Runtime observations remain outside settings and recovery metadata.
+type hardwareSnapshot struct {
+	CPUPercent  *float64 `json:"cpu_percent,omitempty"`
+	CPUCapacity *float64 `json:"cpu_capacity,omitempty"`
+	RSS         *uint64  `json:"engine_rss_bytes,omitempty"`
+	CPUState    string   `json:"cpu_state"`
+	MemoryState string   `json:"memory_state"`
+}
+type bufferSnapshot struct {
+	Transfer        int `json:"transfer_bytes"`
+	Hash            int `json:"hash_bytes"`
+	MaximumTransfer int `json:"maximum_transfer_bytes"`
+	MaximumHash     int `json:"maximum_hash_bytes"`
+}
+
+func hardwareDescription(management *budgetSnapshot) string {
+	if management == nil || management.Hardware == nil {
+		return "CPU: Unknown · Memory observations: Unknown"
+	}
+	h := management.Hardware
+	cpu := "Unknown"
+	if h.CPUPercent != nil {
+		cpu = fmt.Sprintf("%.0f%% of available capacity", *h.CPUPercent)
+	}
+	memory := "Unknown"
+	if strings.HasPrefix(h.MemoryState, "Measured") {
+		memory = "available"
+	} else if strings.HasPrefix(h.MemoryState, "Partial") {
+		memory = "partly available"
+	}
+	text := "CPU: " + cpu + " · Memory observations: " + memory
+	if h.RSS != nil {
+		text += fmt.Sprintf(" · Engine memory: %.1f MB", float64(*h.RSS)/1e6)
+	}
+	if b := management.Buffers; b != nil {
+		text += fmt.Sprintf("\nReserved streaming buffers: %.1f / %.1f MB · Hash buffers: %.1f / %.1f MB", float64(b.Transfer)/1e6, float64(b.MaximumTransfer)/1e6, float64(b.Hash)/1e6, float64(b.MaximumHash)/1e6)
+	}
+	return text
 }

@@ -38,13 +38,15 @@ type budgetWaiter struct {
 	ready  chan *requestLease
 }
 type budgetSnapshot struct {
-	Policy     requestPolicy `json:"policy"`
-	Active     int           `json:"active"`
-	Waiting    int           `json:"waiting"`
-	FileTarget int           `json:"file_target,omitempty"`
-	Draining   bool          `json:"draining,omitempty"`
-	Status     string        `json:"status,omitempty"`
-	Reason     string        `json:"reason,omitempty"`
+	Policy     requestPolicy     `json:"policy"`
+	Active     int               `json:"active"`
+	Waiting    int               `json:"waiting"`
+	FileTarget int               `json:"file_target,omitempty"`
+	Draining   bool              `json:"draining,omitempty"`
+	Status     string            `json:"status,omitempty"`
+	Reason     string            `json:"reason,omitempty"`
+	Hardware   *hardwareSnapshot `json:"hardware,omitempty"`
+	Buffers    *bufferSnapshot   `json:"buffers,omitempty"`
 }
 type jobBudgetSnapshot struct {
 	Active   int  `json:"active"`

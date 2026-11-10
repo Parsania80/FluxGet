@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"reflect"
 	"strings"
@@ -69,7 +68,7 @@ func reconcilePublication(ctx context.Context, path string, c checkpoint, expect
 		return 0, errors.New("publication files changed while acquiring ownership")
 	}
 	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
+	if _, err := copyTransfer(ctx, hash, file, true); err != nil {
 		return 0, fmt.Errorf("verify publication file: %w", err)
 	}
 	actual := hex.EncodeToString(hash.Sum(nil))

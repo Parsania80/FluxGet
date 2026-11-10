@@ -16,6 +16,7 @@ import (
 )
 
 type speedSettings struct {
+	hardwareNote   *widget.Label
 	Enabled        bool             `json:"enabled"`
 	Default        int64            `json:"default_kib"`
 	Overrides      map[string]int64 `json:"overrides"`
@@ -242,7 +243,7 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool)
 	total, origin := widget.NewEntry(), widget.NewEntry()
 	total.SetText(fmt.Sprint(policy.Total))
 	origin.SetText(fmt.Sprint(policy.PerOrigin))
-	managementNote := widget.NewLabel("Automatic measures your downloads and tries one extra connection or file at a time. It keeps extra connections when they improve total speed, respects your speed limits, and lets active files finish when reducing simultaneous downloads. Manual uses your configured maximums. Saved part boundaries stay fixed. Hardware tuning is not available yet.")
+	managementNote := widget.NewLabel("Automatic measures your downloads and tries one extra connection or file at a time. It keeps extra connections when they improve total speed, respects your speed limits, and lets active files finish when reducing simultaneous downloads. Manual uses your configured maximums. Saved part boundaries stay fixed. On Linux, sustained CPU or memory pressure holds new work and reduces connections gradually. Destination and checkpoint timings are measured separately. Missing hardware observations stay Unknown; other systems retain conservative request budgets.")
 	managementNote.Wrapping = fyne.TextWrapWord
 	mode.OnChanged = func(value string) {
 		if value == "Automatic" {
@@ -254,6 +255,8 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool)
 		}
 	}
 	mode.OnChanged(mode.Selected)
+	s.hardwareNote = widget.NewLabel("Hardware observations: collecting samples")
+	s.hardwareNote.Wrapping = fyne.TextWrapWord
 	inputUnit := displayUnit(s.DisplayUnit)
 	unit := widget.NewSelect([]string{"KB", "MB", "GB"}, nil)
 	unit.SetSelected(inputUnit)
@@ -370,7 +373,7 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool)
 		widget.NewLabelWithStyle("Display", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), unitNote, widget.NewForm(widget.NewFormItem("Data unit", unit)), widget.NewSeparator(),
 		widget.NewLabelWithStyle("Downloads", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), note,
 		managementNote,
-		widget.NewAccordion(widget.NewAccordionItem("Customize download management", container.NewVBox(widget.NewForm(widget.NewFormItem("Mode", mode), widget.NewFormItem("Maximum simultaneous downloads", active), widget.NewFormItem("Maximum connections per download", connections), widget.NewFormItem("Maximum total connections", total), widget.NewFormItem("Maximum connections to one server", origin))))),
+		widget.NewAccordion(widget.NewAccordionItem("Customize download management", container.NewVBox(widget.NewForm(widget.NewFormItem("Mode", mode), widget.NewFormItem("Maximum simultaneous downloads", active), widget.NewFormItem("Maximum connections per download", connections), widget.NewFormItem("Maximum total connections", total), widget.NewFormItem("Maximum connections to one server", origin)), s.hardwareNote))),
 		widget.NewForm(widget.NewFormItem("Default folder", container.NewBorder(nil, nil, nil, browse, folder))),
 		widget.NewSeparator(), widget.NewLabelWithStyle("Speed limits", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), speedNote, enabled,
 		limits, save, result,

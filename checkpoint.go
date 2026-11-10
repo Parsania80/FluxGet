@@ -176,9 +176,11 @@ func saveCheckpointMeasured(path string, partial *os.File, c checkpoint, hook fu
 		return fmt.Errorf("inspect checkpoint path: %w", err)
 	}
 	syncStarted := time.Now()
+	metrics.recordFilesystem(partial, false)
 	syncErr := partial.Sync()
 	syncTime = time.Since(syncStarted)
 	metrics.addDuration(metricSync, syncTime)
+	metrics.recordStorage(storageDataSync, syncTime)
 	if syncErr != nil {
 		return fmt.Errorf("sync partial file: %w", syncErr)
 	}
@@ -187,14 +189,21 @@ func saveCheckpointMeasured(path string, partial *os.File, c checkpoint, hook fu
 		return fmt.Errorf("create checkpoint: %w", err)
 	}
 	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(data); err != nil {
+	metrics.recordFilesystem(tmp, true)
+	storageStarted := time.Now()
+	_, writeErr := tmp.Write(data)
+	metrics.recordStorage(storageCheckpointWrite, time.Since(storageStarted))
+	if err := writeErr; err != nil {
 		tmp.Close()
 		return fmt.Errorf("write checkpoint: %w", err)
 	}
 	if hook != nil {
 		hook("checkpoint-written")
 	}
-	if err := tmp.Sync(); err != nil {
+	storageStarted = time.Now()
+	tmpSyncErr := tmp.Sync()
+	metrics.recordStorage(storageCheckpointSync, time.Since(storageStarted))
+	if err := tmpSyncErr; err != nil {
 		tmp.Close()
 		return fmt.Errorf("sync checkpoint: %w", err)
 	}
@@ -204,7 +213,10 @@ func saveCheckpointMeasured(path string, partial *os.File, c checkpoint, hook fu
 	if hook != nil {
 		hook("checkpoint-synced")
 	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
+	storageStarted = time.Now()
+	renameErr := os.Rename(tmp.Name(), path)
+	metrics.recordStorage(storageCheckpointPublish, time.Since(storageStarted))
+	if err := renameErr; err != nil {
 		return fmt.Errorf("publish checkpoint: %w", err)
 	}
 	if hook != nil {

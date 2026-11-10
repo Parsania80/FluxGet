@@ -93,12 +93,15 @@ type automaticQueueHarness struct {
 	requestID int
 }
 
-func startAutomaticQueueHarness(t *testing.T) *automaticQueueHarness {
+func startAutomaticQueueHarness(t *testing.T, source ...func(time.Time) hardwareSnapshot) *automaticQueueHarness {
 	h := &automaticQueueHarness{output: &queueOutput{}, ticks: make(chan time.Time), done: make(chan error, 1)}
 	h.at.Store(time.Unix(100, 0).UnixNano())
 	input, commands := io.Pipe()
 	h.commands = commands
 	ctx, cancel := context.WithCancel(context.Background())
+	if len(source) > 0 {
+		ctx = context.WithValue(ctx, hardwareSourceKey{}, source[0])
+	}
 	go func() {
 		h.done <- runQueueClock(ctx, input, h.output, 3, 4, func() time.Time { return time.Unix(0, h.at.Load()) }, h.ticks)
 	}()

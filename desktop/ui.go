@@ -436,6 +436,9 @@ func (v *downloadsView) accept(response desktopResponse) {
 	}
 	v.revision = response.Revision
 	v.management = response.Management
+	if v.settings.hardwareNote != nil {
+		v.settings.hardwareNote.SetText(hardwareDescription(response.Management))
+	}
 	v.apply(response.Jobs)
 }
 

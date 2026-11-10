@@ -63,6 +63,8 @@ func runQueue(ctx context.Context, input io.Reader, output io.Writer, maxActive,
 // A clock boundary lets scheduler integration tests advance observation windows
 // while real HTTP transfers and checkpoint owners continue normally.
 func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxActive, connections int, clock func() time.Time, ticks <-chan time.Time) error {
+	buffers := newBufferBudget()
+	ctx = context.WithValue(ctx, bufferBudgetKey{}, buffers)
 	path, err := queuePath()
 	if err != nil {
 		return err
@@ -119,6 +121,9 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 	observations := make(map[int]transferObservation)
 	generation := uint64(1)
 	automatic := newAutomaticController()
+	resources := newResourceGuard()
+	hardware := startHardwareMonitor()
+	defer hardware.close()
 	defer budget.close()
 	done := make(chan queueResult, maxActive)
 	updates := make(chan queueProgress, maxActive*2)
@@ -208,6 +213,9 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 		fileMaximum := maxActive
 		if management.Policy.Mode == "automatic" {
 			fileMaximum = automatic.admissionMaximum(maxActive, automaticJobs(), budget, clock())
+			if resources.blocked {
+				fileMaximum = len(active)
+			}
 		}
 		if started && !stopping {
 			for i := range q.Jobs {
@@ -264,9 +272,30 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 		}
 		select {
 		case now := <-ticks:
+			resourceChanged := resources.observe(now, hardware.snapshot(ctx, clock()), automaticJobs(), generation)
 			if management.Policy.Mode == "automatic" && !stopping {
 				if automatic.readLimits(ctx) {
 					generation++
+				}
+				if resourceChanged {
+					// Reset throughput learning, without invalidating the storage
+					// trial whose own recovery may have caused this transition.
+					applyAutomatic(automatic.discard(generation, now))
+				}
+				if resources.blocked {
+					applyAutomatic(automatic.discard(generation, now))
+					for _, update := range resources.adjust(now, automaticJobs(), generation) {
+						applyAutomatic(&update)
+					}
+					automatic.resourceBlocked = true
+					automatic.resourceReason = resources.reason
+					automatic.files = 1
+				} else {
+					automatic.resourceBlocked = false
+					for _, update := range resources.adjust(now, automaticJobs(), generation) {
+						applyAutomatic(&update)
+						applyAutomatic(automatic.discard(generation, now))
+					}
 				}
 				jobs := automaticJobs()
 				feedback := budget.takeFeedback()
@@ -595,9 +624,16 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 					management.Draining = len(active) > automatic.files
 					management.Status, management.Reason = automatic.status, automatic.reason
 				}
+				management.Hardware = &resources.hardware
+				bufferState := buffers.snapshot()
+				management.Buffers = &bufferState
 				response.Management = &management
 				for i := range response.Jobs {
 					entry := &response.Jobs[i]
+					if w := resources.storage[entry.ID]; w != nil {
+						view := w.view
+						entry.Storage = &view
+					}
 					if m := measurements[entry.ID]; m != nil {
 						snapshot := m.snapshot()
 						entry.Measurements = &snapshot
@@ -828,6 +864,14 @@ func runQueueDownload(ctx context.Context, j queueJob, connections int) error {
 }
 
 func runQueueDownloadWithProgress(ctx context.Context, j queueJob, connections int, progress io.Writer) error {
+	if budget, ok := ctx.Value(bufferBudgetKey{}).(*bufferBudget); ok {
+		buffers, err := budget.acquire(ctx)
+		if err != nil {
+			return err
+		}
+		defer buffers.release()
+		ctx = context.WithValue(ctx, transferBufferKey{}, buffers)
+	}
 	client := defaultDownloadClient()
 	if budget, ok := ctx.Value(budgetContextKey{}).(*requestBudget); ok {
 		client.Transport = &requestTransport{base: client.Transport, budget: budget, job: j.ID, metrics: measurementsFrom(ctx)}

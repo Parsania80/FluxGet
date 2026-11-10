@@ -250,17 +250,30 @@ func runChunks(ctx context.Context, client *http.Client, path string, partial *o
 	}
 	active := make(map[int]*rangeWorker)
 	rawURL := c.URL
-	launch := func(i int) {
+	buffers, _ := ctx.Value(bufferBudgetKey{}).(*bufferBudget)
+	launch := func(i int) bool {
+		var reserved *transferBuffers
+		if buffers != nil {
+			reserved, _ = buffers.reserve()
+			if reserved == nil {
+				return false
+			}
+		}
+
 		chunk := c.Chunks[i]
 		part := segments.part(i)
 		part.setReceived(chunk.savedLength())
 		part.setState(segmentConnecting)
 		partCtx, stop := context.WithCancel(workerCtx)
+		if reserved != nil {
+			partCtx = context.WithValue(partCtx, transferBufferKey{}, reserved)
+		}
 		active[i] = &rangeWorker{cancel: stop}
 		if m := measurementsFrom(ctx); m != nil {
 			m.workerChanges.Add(1)
 		}
 		go func() {
+			defer reserved.release()
 			report := func(n int64, sum string) error {
 				update := rangeCheckpoint{index: i, downloaded: n, digest: sum, done: make(chan error, 1)}
 				// Keep draining reports after cancellation to save final prefixes.
@@ -274,6 +287,7 @@ func runChunks(ctx context.Context, client *http.Client, path string, partial *o
 			stop()
 			results <- rangeResult{index: i, downloaded: n, digest: digest, err: err}
 		}()
+		return true
 	}
 	done := make(chan struct{})
 	progressDone := make(chan struct{})
@@ -322,6 +336,10 @@ func runChunks(ctx context.Context, client *http.Client, path string, partial *o
 	}
 	ctxDone := ctx.Done()
 	for {
+		var bufferChanged <-chan struct{}
+		if buffers != nil {
+			bufferChanged = buffers.signal()
+		}
 		settings := *control.settings.Load()
 		requestedTarget := settings.Target
 		target := min(requestedTarget, len(c.Chunks))
@@ -354,7 +372,10 @@ func runChunks(ctx context.Context, client *http.Client, path string, partial *o
 					break
 				}
 				if chunk.SHA256 == "" && active[i] == nil {
-					launch(i)
+					if !launch(i) {
+						settings.Reason = "Waiting for transfer buffer capacity"
+						break
+					}
 				}
 			}
 		}
@@ -368,12 +389,22 @@ func runChunks(ctx context.Context, client *http.Client, path string, partial *o
 			segments.publish()
 		}
 		if len(active) == 0 {
-			break
+			unfinished := false
+			for _, chunk := range c.Chunks {
+				if chunk.SHA256 == "" {
+					unfinished = true
+					break
+				}
+			}
+			if !unfinished || workerCtx.Err() != nil {
+				break
+			}
 		}
 		select {
 		case <-ctxDone:
 			ctxDone = nil
 			cancel()
+		case <-bufferChanged:
 		case <-control.changed:
 		case update := <-checkpoints:
 			update.done <- persistRange(update.index, update.downloaded, update.digest, false)
@@ -521,7 +552,7 @@ func fetchRange(ctx context.Context, client *http.Client, rawURL string, partial
 	}
 	part.setState(segmentDownloading)
 	writer := &rangeWriter{out: measuredFileWriter{io.NewOffsetWriter(partial, start), measurementsFrom(ctx)}, count: count, part: part, digest: digest, written: saved, saved: saved, total: chunk.End - chunk.Start, last: time.Now(), report: report}
-	_, err = io.CopyN(writer, response.Body, length)
+	_, err = copyTransferN(ctx, writer, response.Body, length, false)
 	if saveErr := writer.savePrefix(); saveErr != nil {
 		err = errors.Join(err, saveErr)
 	}

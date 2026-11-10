@@ -41,9 +41,10 @@ func (s *queueSpeed) current(now time.Time) float64 {
 
 type desktopEntry struct {
 	queueJob
-	AutomaticReason string   `json:"automatic_reason,omitempty"`
-	Activity        string   `json:"activity,omitempty"`
-	Speed           *float64 `json:"speed_bytes_per_second,omitempty"`
+	Storage         *storageView `json:"storage,omitempty"`
+	AutomaticReason string       `json:"automatic_reason,omitempty"`
+	Activity        string       `json:"activity,omitempty"`
+	Speed           *float64     `json:"speed_bytes_per_second,omitempty"`
 	segmentSnapshot
 	Measurements *measurementSnapshot `json:"measurements,omitempty"`
 	Observation  *transferObservation `json:"observation,omitempty"`

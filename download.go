@@ -159,7 +159,7 @@ func downloadNamed(ctx context.Context, client *http.Client, rawURL string, dest
 		tracker.checkpoint = checkpointProgressObserved(ctx, checkpointPath, partial, saved, hash, 0)
 	}
 	tracker.report()
-	written, err := io.Copy(tracker, response.Body)
+	written, err := copyTransfer(ctx, tracker, response.Body, false)
 	tracker.report()
 	if err != nil {
 		return written, errors.Join(fmt.Errorf("transfer failed; partial data kept at %q: %w", partialPath, err), saveInterruptedObserved(ctx, checkpointPath, partial, saved, written))
