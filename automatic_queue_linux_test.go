@@ -25,24 +25,43 @@ type automaticHTTPFixture struct {
 	mu      sync.Mutex
 	streams map[chan int]bool
 	finish  chan struct{}
+	probes  atomic.Int64
+	ranges  atomic.Int64
+	full    atomic.Int64
 }
 
 func newAutomaticHTTPFixture(t *testing.T) *automaticHTTPFixture {
-	s := &automaticHTTPFixture{payload: bytes.Repeat([]byte("adaptive"), 4<<20), streams: map[chan int]bool{}, finish: make(chan struct{})}
+	return newAutomaticHTTPFixtureSized(t, 4<<20, true)
+}
+
+func newAutomaticHTTPFixtureSized(t *testing.T, repetitions int, validator bool) *automaticHTTPFixture {
+	s := &automaticHTTPFixture{payload: bytes.Repeat([]byte("adaptive"), repetitions), streams: map[chan int]bool{}, finish: make(chan struct{})}
 	s.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("ETag", `"adaptive-v1"`)
-		var start, end int
-		if _, err := fmt.Sscanf(r.Header.Get("Range"), "bytes=%d-%d", &start, &end); err != nil || start < 0 || end >= len(s.payload) || start > end {
-			http.Error(w, "invalid range", 416)
-			return
+		if validator {
+			w.Header().Set("ETag", `"adaptive-v1"`)
+		}
+		start, end := 0, len(s.payload)-1
+		partial := r.Header.Get("Range") != ""
+		if partial {
+			if _, err := fmt.Sscanf(r.Header.Get("Range"), "bytes=%d-%d", &start, &end); err != nil || start < 0 || end >= len(s.payload) || start > end {
+				http.Error(w, "invalid range", 416)
+				return
+			}
 		}
 		if r.Header.Get("Range") == "bytes=0-0" {
+			s.probes.Add(1)
 			http.ServeContent(w, r, "fixture", time.Time{}, bytes.NewReader(s.payload))
 			return
 		}
-		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(s.payload)))
 		w.Header().Set("Content-Length", fmt.Sprint(end-start+1))
-		w.WriteHeader(206)
+		if partial {
+			s.ranges.Add(1)
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(s.payload)))
+			w.WriteHeader(http.StatusPartialContent)
+		} else {
+			s.full.Add(1)
+			w.WriteHeader(http.StatusOK)
+		}
 		w.(http.Flusher).Flush()
 		stream := make(chan int, 1)
 		s.mu.Lock()
@@ -126,6 +145,9 @@ func (h *automaticQueueHarness) request(t *testing.T, req desktopRequest) deskto
 	h.requestID++
 	req.ID = h.requestID
 	data, _ := json.Marshal(req)
+	h.output.mu.Lock()
+	start := len(h.output.text)
+	h.output.mu.Unlock()
 	if _, err := fmt.Fprintf(h.commands, "desktop-json %s\n", data); err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +155,7 @@ func (h *automaticQueueHarness) request(t *testing.T, req desktopRequest) deskto
 	waitQueue(t, func() bool {
 		h.output.mu.Lock()
 		defer h.output.mu.Unlock()
-		for _, line := range strings.Split(h.output.text, "\n") {
+		for _, line := range strings.Split(h.output.text[start:], "\n") {
 			if strings.HasPrefix(line, "DESKTOP_JSON ") && json.Unmarshal([]byte(strings.TrimPrefix(line, "DESKTOP_JSON ")), &response) == nil && response.ID == req.ID {
 				return true
 			}

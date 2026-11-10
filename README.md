@@ -15,6 +15,8 @@ FluxGet is a download manager written in Go. It helps you manage several downloa
 - Select several downloads for shared actions or confirmed file deletion.
 - Let Automatic mode adjust downloads and connections within your limits.
 
+Automatic starts with one connection and may keep using one. If a server cannot provide safely validated file parts, FluxGet uses a single stream. Even when a server supports file parts, FluxGet must check that they all belong to the same file version.
+
 On Linux, Automatic also watches CPU, memory, and storage pressure and reduces work when needed. Manual controls are available in Settings. Browser download capture and using Wi-Fi and Ethernet together are planned.
 
 ## Build and open the desktop app
