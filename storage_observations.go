@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"sync/atomic"
 	"time"
@@ -66,6 +67,18 @@ func (m *transferMeasurements) storageSnapshot() storageCounters {
 	}
 	return s
 }
+
+// A caller that accelerates observation time can supply storage observations
+// from the same clock domain. Normal queues always use the measured counters.
+type storageSourceKey struct{}
+
+func storageObservations(ctx context.Context, measured storageCounters) storageCounters {
+	if source, ok := ctx.Value(storageSourceKey{}).(func(storageCounters) storageCounters); ok {
+		return source(measured)
+	}
+	return measured
+}
+
 func storageP95(current, previous storageCounters, kind int) (float64, bool) {
 	count := uint64(0)
 	for i := range storageBounds {

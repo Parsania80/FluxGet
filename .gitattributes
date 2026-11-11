@@ -1,0 +1,5 @@
+# Keep source and executable scripts consistent across Linux and Windows checkouts.
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.png binary
+*.ico binary

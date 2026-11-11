@@ -43,7 +43,11 @@ jobs:
             echo 'Tag does not match the source version.' >&2
             exit 1
           fi
-          test -z "$(gofmt -l .)"
+          unformatted=$(gofmt -l .)
+          if [[ -n "$unformatted" ]]; then
+            printf 'Unformatted Go files:\n%s\n' "$unformatted" >&2
+            exit 1
+          fi
           node --test extensions/core.test.cjs
           python -m py_compile packaging/build_release.py packaging/build_browser_extensions.py packaging/install_browser_bridge.py
       - name: Linux desktop build dependencies

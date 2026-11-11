@@ -206,7 +206,9 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 			if actual := measurements[job.ID].origin.Load(); actual != nil {
 				origin = *actual
 			}
-			jobs = append(jobs, automaticJob{id: job.ID, origin: origin, layout: live[job.ID], metrics: measurements[job.ID].snapshot(), target: settings.Target, maximum: settings.Maximum, requests: requests[job.ID], stopping: requested[job.ID] != ""})
+			metrics := measurements[job.ID].snapshot()
+			metrics.Storage = storageObservations(ctx, metrics.Storage)
+			jobs = append(jobs, automaticJob{id: job.ID, origin: origin, layout: live[job.ID], metrics: metrics, target: settings.Target, maximum: settings.Maximum, requests: requests[job.ID], stopping: requested[job.ID] != ""})
 		}
 		return jobs
 	}

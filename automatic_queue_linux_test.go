@@ -118,6 +118,18 @@ func startAutomaticQueueHarness(t *testing.T, source ...func(time.Time) hardware
 	input, commands := io.Pipe()
 	h.commands = commands
 	ctx, cancel := context.WithCancel(context.Background())
+	// These tests accelerate observation seconds while doing real HTTP/file IO.
+	// Host fsync latency must not compete with the controlled throughput trial;
+	// retain real sample counts/roles but provide a stable 1ms storage fixture.
+	ctx = context.WithValue(ctx, storageSourceKey{}, func(measured storageCounters) storageCounters {
+		stable := storageCounters{Destination: measured.Destination, Checkpoint: measured.Checkpoint}
+		for kind, bins := range measured.Bins {
+			for _, count := range bins {
+				stable.Bins[kind][0] += count
+			}
+		}
+		return stable
+	})
 	if len(source) > 0 {
 		ctx = context.WithValue(ctx, hardwareSourceKey{}, source[0])
 	}
