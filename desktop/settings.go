@@ -105,7 +105,7 @@ func (s *speedSettings) save() error {
 	if err = f.Close(); err != nil {
 		return err
 	}
-	return os.Rename(f.Name(), s.path)
+	return platformfile.Replace(f.Name(), s.path)
 }
 
 func (s *speedSettings) saveDownloadLimit(key string, value int64) error {

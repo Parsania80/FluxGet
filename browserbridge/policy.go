@@ -116,7 +116,7 @@ func (s *Store) Edit(edit func(*Policy) error) error {
 	if ce != nil {
 		return ce
 	}
-	if err = os.Rename(f.Name(), s.path); err != nil {
+	if err = platformfile.Replace(f.Name(), s.path); err != nil {
 		return err
 	}
 	s.policy = next

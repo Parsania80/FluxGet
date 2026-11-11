@@ -215,7 +215,7 @@ func saveCheckpointMeasured(path string, partial *os.File, c checkpoint, hook fu
 		hook("checkpoint-synced")
 	}
 	storageStarted = time.Now()
-	renameErr := os.Rename(tmp.Name(), path)
+	renameErr := platformfile.Replace(tmp.Name(), path)
 	metrics.recordStorage(storageCheckpointPublish, time.Since(storageStarted))
 	if err := renameErr; err != nil {
 		return fmt.Errorf("publish checkpoint: %w", err)

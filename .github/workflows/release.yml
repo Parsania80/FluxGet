@@ -73,11 +73,25 @@ jobs:
         env:
           CGO_ENABLED: '1'
         run: |
-          go test -race -count=1 -run '^TestWindows' ./...
+          go test -race -count=1 -v -run '^TestWindows' ./... 2>&1 | tee "$RUNNER_TEMP/fluxget-windows-tests.log"
           go vet ./...
           cd desktop
-          go test -race -count=1 -run '^(TestDownloadUsesExistingCLI|TestPausedDownloadCanResume|TestDesktopQueueUsesPersistentCLIScheduler)$' .
+          go test -race -count=1 -v -run '^(TestDownloadUsesExistingCLI|TestPausedDownloadCanResume|TestDesktopQueueUsesPersistentCLIScheduler)$' . 2>&1 | tee -a "$RUNNER_TEMP/fluxget-windows-tests.log"
           go vet ./...
+      - name: Report native Windows test errors
+        if: failure() && runner.os == 'Windows'
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          path = Path(os.environ['RUNNER_TEMP']) / 'fluxget-windows-tests.log'
+          if path.exists():
+              lines = path.read_text(errors='replace').splitlines()
+              chosen = [line for line in lines if 'FAIL' in line or '.go:' in line]
+              message = '\n'.join(chosen or lines[-30:])[-10000:]
+              message = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              print('::error title=Native Windows regression details::' + message)
+          PY
       - name: Build release archive
         env:
           CGO_LDFLAGS: ${{ runner.os == 'Windows' && '-static' || '' }}

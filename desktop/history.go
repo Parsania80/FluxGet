@@ -100,7 +100,7 @@ func saveHistory(jobs []job) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	return os.Rename(f.Name(), path)
+	return platformfile.Replace(f.Name(), path)
 }
 
 func copyPath(path string) (string, error) {

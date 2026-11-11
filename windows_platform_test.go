@@ -162,7 +162,7 @@ func TestWindowsMetadataReplacementWithOpenReader(t *testing.T) {
 	if err := os.WriteFile(path+".new", []byte("new"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Rename(path+".new", path); err != nil {
+	if err := platformfile.Replace(path+".new", path); err != nil {
 		t.Fatalf("metadata reader blocked atomic replacement: %v", err)
 	}
 	old, err := io.ReadAll(reader)

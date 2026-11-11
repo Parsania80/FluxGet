@@ -171,7 +171,7 @@ func saveQueue(path string, q queueData) error {
 	if err = f.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(f.Name(), path); err != nil {
+	if err = platformfile.Replace(f.Name(), path); err != nil {
 		return fmt.Errorf("publish queue: %w", err)
 	}
 	return nil
