@@ -28,7 +28,7 @@ Keep these priorities while continuing engine release verification alongside pro
 
 ### ⏭️ Next: #7–8 — Windows/Linux browser acceptance and store distribution
 
-**Next concrete work:** Verify local paired builds and packaged installation, push the prepared commit through the operator's GitHub Desktop sign-in, and run the release workflow on native Linux/Windows runners. The first v1.0.0 main push tags and publishes automatically only after both native jobs pass; existing releases are never replaced. Later versions require explicit tags. Then perform operator browser acceptance on Windows and another Linux installation. Store submissions/signing and a graphical per-browser setup remain separate work.
+**Next concrete work:** Verify local paired builds and packaged installation, push the prepared `v1.0.0` branch through the operator's GitHub Desktop sign-in, then push the annotated `v1.0.0` tag to run native Linux/Windows release checks. Only numeric `vMAJOR.MINOR.PATCH` tags matching the source version build/publish packages; branch pushes run ordinary CI. Existing releases are never replaced. Then perform operator browser acceptance on Windows and another Linux installation. Store submissions/signing and a graphical per-browser setup remain separate work.
 
 ## Product scope and release boundaries
 

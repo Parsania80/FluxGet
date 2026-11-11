@@ -4,7 +4,7 @@
 
 FluxGet is a download manager written in Go. It helps you manage several downloads, control their speed, and continue saved downloads after an interruption when the server allows it.
 
-**Version 1.0.0 is being prepared for Linux and Windows (64-bit Intel/AMD).** Publishing waits for checks on both operating systems; a failed check keeps the release unpublished while fixes are verified. Release packages are built on native Linux and Windows runners. Windows browser capture and other Linux distributions still need hands-on testing. macOS is not included.
+**Version 1.0.0 is being prepared for Linux and Windows (64-bit Intel/AMD).** Publishing waits for checks on both operating systems; a failed check keeps the release unpublished while fixes are verified. Release packages are built on native Linux and Windows runners only when a version tag such as `v1.0.0` is pushed. Branch pushes run checks without publishing packages. Windows browser capture and other Linux distributions still need hands-on testing. macOS is not included.
 
 ## What you can do
 

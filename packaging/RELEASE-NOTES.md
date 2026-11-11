@@ -23,7 +23,7 @@ Enable **Settings → Browser downloads** in FluxGet, enable the browser, then e
 
 ## Testing boundaries
 
-The first v1.0.0 main push publishes only after both native jobs pass; later releases require explicit version tags. Existing releases are never overwritten. The release workflow requires Linux suites and native Windows engine/IPC/desktop companion regressions before publishing either package. Windows browser capture, Firefox Snap/Flatpak portals, Opera, and other Linux distributions still require hands-on acceptance. Opera files are included for development but Windows setup does not register Opera until native-host discovery is verified. Chrome capture has native Linux evidence.
+Only explicit version tags such as v1.0.0 build and publish packages, after both native jobs pass. Branch pushes do not publish packages. Existing releases are never overwritten. The release workflow requires Linux suites and native Windows engine/IPC/desktop companion regressions before publishing either package. Windows browser capture, Firefox Snap/Flatpak portals, Opera, and other Linux distributions still require hands-on acceptance. Opera files are included for development but Windows setup does not register Opera until native-host discovery is verified. Chrome capture has native Linux evidence.
 
 Automatic CPU/memory/storage observations are Linux-specific; unavailable Windows observations remain unknown. Automatic still uses transfer measurements and request budgets on Windows.
 
