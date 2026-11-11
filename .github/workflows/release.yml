@@ -51,7 +51,7 @@ jobs:
             exit 1
           fi
           node --test extensions/core.test.cjs
-          python -m py_compile packaging/build_release.py packaging/build_browser_extensions.py packaging/install_browser_bridge.py
+          python -m py_compile packaging/build_release.py packaging/build_deb.py packaging/build_browser_extensions.py packaging/install_browser_bridge.py
       - name: Linux desktop build dependencies
         if: runner.os == 'Linux'
         run: |
@@ -80,54 +80,65 @@ jobs:
           cd desktop
           go test -race -tags ci -count=1 -v -run '^(TestDownloadUsesExistingCLI|TestPausedDownloadCanResume|TestDesktopQueueUsesPersistentCLIScheduler)$' . 2>&1 | tee -a "$RUNNER_TEMP/fluxget-windows-tests.log"
           go vet -tags ci ./...
-      - name: Report native Windows test errors
-        if: failure() && runner.os == 'Windows'
-        run: |
-          python - <<'PY'
-          import os
-          from pathlib import Path
-          path = Path(os.environ['RUNNER_TEMP']) / 'fluxget-windows-tests.log'
-          if path.exists():
-              lines = path.read_text(errors='replace').splitlines()
-              chosen = [line for line in lines if 'FAIL' in line or '.go:' in line]
-              message = '\n'.join(chosen or lines[-30:])[-10000:]
-              message = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-              print('::error title=Native Windows regression details::' + message)
-          PY
-      - name: Build release archive
+      - name: Build native installer
         env:
           CGO_LDFLAGS: ${{ runner.os == 'Windows' && '-static' || '' }}
-        run: python packaging/build_release.py --platform '${{ matrix.platform }}'
-      - name: Verify packaged Linux installation
+        run: python packaging/build_release.py --platform '${{ matrix.platform }}' 2>&1 | tee "$RUNNER_TEMP/fluxget-build.log"
+      - name: Verify Debian package installation
         if: runner.os == 'Linux'
         run: |
-          stage="$GITHUB_WORKSPACE/dist/release/stage/fluxget-$(tr -d '\n' < internal/buildinfo/version.txt)-linux-amd64"
-          sandbox=$(mktemp -d)
-          HOME="$sandbox" XDG_CONFIG_HOME="$sandbox/.config" sh "$stage/install.sh"
-          "$sandbox/.local/opt/fluxget/fluxget" -version
-          HOME="$sandbox" XDG_CONFIG_HOME="$sandbox/.config" sh "$sandbox/.local/opt/fluxget/uninstall.sh"
-          test ! -e "$sandbox/.config/google-chrome/NativeMessagingHosts/io.github.parsania80.fluxget.json"
-      - name: Verify packaged Windows installation
+          version=$(tr -d '\r\n' < internal/buildinfo/version.txt)
+          package="$GITHUB_WORKSPACE/dist/release/fluxget_${version}_amd64.deb"
+          dpkg-deb --info "$package"
+          sudo dpkg -i "$package"
+          test "$(fluxget -version)" = "FluxGet $version"
+          test -x /opt/fluxget/fluxget-gui
+          ldd /opt/fluxget/fluxget-gui | tee "$RUNNER_TEMP/fluxget-runtime-libraries.txt"
+          if grep -q 'not found' "$RUNNER_TEMP/fluxget-runtime-libraries.txt"; then exit 1; fi
+          test -f /etc/opt/chrome/native-messaging-hosts/io.github.parsania80.fluxget.json
+          sudo dpkg -r fluxget
+          test ! -e /opt/fluxget/fluxget
+          test ! -e /etc/opt/chrome/native-messaging-hosts/io.github.parsania80.fluxget.json
+      - name: Verify Windows setup installation and uninstall
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $version = (Get-Content internal/buildinfo/version.txt).Trim()
-          $stage = Join-Path $PWD "dist/release/stage/fluxget-$version-windows-amd64"
+          $setup = Join-Path $PWD "dist/release/fluxget-$version-windows-amd64-setup.exe"
           $target = Join-Path $env:RUNNER_TEMP 'FluxGet install test'
-          & "$stage/install.ps1" -InstallDir $target
+          $process = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$target`"") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Setup failed with exit code $($process.ExitCode)" }
           if ((& "$target/fluxget.exe" -version) -ne "FluxGet $version") { throw 'Installed version mismatch' }
           $manifest = Get-Content "$target/native-chrome.json" | ConvertFrom-Json
           if ($manifest.path -ne "$target\fluxget-native-chrome.exe") { throw 'Native host path mismatch' }
-          & "$stage/install.ps1" -InstallDir $target
+          $process = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$target`"") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Setup repair failed' }
           if (-not (Test-Path "$target/extensions/chrome/manifest.json")) { throw 'Repair lost extension files' }
-          & "$target/uninstall.ps1"
+          $process = Start-Process -FilePath "$target/unins000.exe" -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Uninstall failed' }
+          if (Test-Path "$target/fluxget.exe") { throw 'Uninstall left application executable' }
           if (Test-Path 'HKCU:\Software\Google\Chrome\NativeMessagingHosts\io.github.parsania80.fluxget') { throw 'Uninstall left native host registered' }
+      - name: Report build or test errors
+        if: failure()
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          for filename in ('fluxget-windows-tests.log', 'fluxget-build.log'):
+              path = Path(os.environ['RUNNER_TEMP']) / filename
+              if path.exists():
+                  lines = path.read_text(errors='replace').splitlines()
+                  chosen = [line for line in lines if 'FAIL' in line or '.go:' in line or 'Error' in line]
+                  message = '\n'.join(chosen or lines[-30:])[-10000:]
+                  message = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                  print('::error title=Release verification details::' + message)
+          PY
       - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.platform }}-amd64
           path: |
-            dist/release/*.tar.gz
-            dist/release/*.zip
+            dist/release/*.deb
+            dist/release/*-setup.exe
             dist/release/*.sha256
           if-no-files-found: error
 
@@ -161,7 +172,7 @@ jobs:
             exit 0
           fi
           cd release-assets
-          test -f "fluxget-$version-linux-amd64.tar.gz"
-          test -f "fluxget-$version-windows-amd64.zip"
+          test -f "fluxget_${version}_amd64.deb"
+          test -f "fluxget-$version-windows-amd64-setup.exe"
           sha256sum -c *.sha256
           gh release create "$tag" ./* --repo "$GITHUB_REPOSITORY" --verify-tag --title "FluxGet $tag" --notes-file "$GITHUB_WORKSPACE/packaging/RELEASE-NOTES.md"

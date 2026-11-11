@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the matching desktop, engine, browser hosts and versioned release archive."""
+"""Build the matching desktop, engine, browser hosts and versioned native release installer."""
 import argparse
 import base64
 import hashlib
@@ -9,8 +9,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-import tarfile
-import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = (ROOT / 'internal/buildinfo/version.txt').read_text().strip()
@@ -74,11 +72,16 @@ if exe:
     for source in ('install.ps1', 'uninstall.ps1', 'Install.cmd'):
         shutil.copy2(ROOT / 'packaging/windows' / source, stage / source)
     shutil.copy2(ROOT / 'desktop/assets/fluxget.ico', stage / 'fluxget.ico')
-    archive = args.out / (name + '.zip')
-    with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as z:
-        for file in sorted(stage.rglob('*')):
-            if file.is_file():
-                z.write(file, file.relative_to(stage.parent))
+    compiler = os.environ.get('ISCC') or shutil.which('ISCC.exe') or shutil.which('iscc')
+    if not compiler:
+        candidate = Path(os.environ.get('ProgramFiles(x86)', 'C:/Program Files (x86)')) / 'Inno Setup 6/ISCC.exe'
+        if candidate.is_file():
+            compiler = str(candidate)
+    if not compiler:
+        raise SystemExit('Install Inno Setup 6 to build the Windows setup executable')
+    run([compiler, f'/DAppVersion={VERSION}', f'/DStageDir={stage}', f'/DReleaseDir={args.out}', str(ROOT / 'packaging/windows/fluxget.iss')])
+    archive = args.out / f'fluxget-{VERSION}-windows-amd64-setup.exe'
+
 else:
     shutil.copy2(ROOT / 'packaging/linux/install.sh', stage / 'install.sh')
     shutil.copy2(ROOT / 'packaging/linux/uninstall.sh', stage / 'uninstall.sh')
@@ -88,9 +91,9 @@ else:
     for file in [*stage.glob('fluxget*'), stage / 'install.sh', stage / 'uninstall.sh']:
         if file.suffix not in ('.png', '.ico'):
             file.chmod(0o755)
-    archive = args.out / (name + '.tar.gz')
-    with tarfile.open(archive, 'w:gz') as tar:
-        tar.add(stage, arcname=name)
+    run([sys.executable, 'packaging/build_deb.py', '--stage', str(stage), '--out', str(args.out)])
+    archive = args.out / f'fluxget_{VERSION}_amd64.deb'
+
 checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
-(archive.parent / (archive.name + '.sha256')).write_text(f'{checksum}  {archive.name}\n')
+(archive.parent / (archive.name + '.sha256')).write_text(f'{checksum}  {archive.name}\n', newline='\n')
 print(f'Release artifact: {archive}')

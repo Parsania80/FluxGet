@@ -20,7 +20,7 @@ Keep these priorities while continuing engine release verification alongside pro
 | 6 | Chrome capture and integration settings | 🔄 Current | Preview implemented; real popup consent, capture and master-disable fallback tested; normal setup/permission review remains |
 | 7 | Firefox and Opera rollout | ⬜ Todo | Manifests and shared implementation prepared; package-specific native verification is pending |
 | 8 | Browser packaging and acceptance | ⬜ Todo | Stable extension IDs, distribution, repair/uninstall, privacy, crash tests |
-| 9 | v1.0.0 Windows/Linux release | 🔄 Current | Versioned archives, per-user setup, native Windows regressions and publishing gate; publication pending |
+| 9 | v1.0.0 Windows/Linux release | 🔄 Current | Native .deb/.exe installers, native Windows regressions and tag-only publishing gate; publication pending |
 | 10 | Multi-interface experiment | ⬜ Todo | Prove routing, correct output, failover, and benefit on independent uplinks |
 | 11 | Authenticated browser downloads | ⬜ Todo | Separate consent, credential, request-replay, and recovery design |
 
@@ -28,11 +28,11 @@ Keep these priorities while continuing engine release verification alongside pro
 
 ### ⏭️ Next: #7–8 — Windows/Linux browser acceptance and store distribution
 
-**Next concrete work:** Verify local paired builds and packaged installation, push the prepared `v1.0.0` branch through the operator's GitHub Desktop sign-in, then push the annotated `v1.0.0` tag to run native Linux/Windows release checks. Only numeric `vMAJOR.MINOR.PATCH` tags matching the source version build/publish packages; branch pushes run ordinary CI. Existing releases are never replaced. Then perform operator browser acceptance on Windows and another Linux installation. Store submissions/signing and a graphical per-browser setup remain separate work.
+**Next concrete work:** Verify local paired builds and native .deb/.exe installation, push the prepared `v1.0.0` branch through the operator's GitHub Desktop sign-in, then push the annotated `v1.0.0` tag to run native Linux/Windows release checks. Only numeric `vMAJOR.MINOR.PATCH` tags matching the source version build/publish packages; branch pushes run ordinary CI. Existing releases are never replaced. Then perform operator browser acceptance on Windows and another Linux installation. Store submissions/signing and a graphical per-browser setup remain separate work.
 
 ## Product scope and release boundaries
 
-The v1 release targets are **Linux/amd64 and Windows/amd64**. Linux archives are built on Ubuntu 22.04 for an older glibc baseline; native Windows checks use Windows Server 2022. Ubuntu 26.04.1 with Go 1.26.8 has local runtime evidence. Windows browser acceptance is pending, macOS remains cross-build-only, and ARM64 is pending. Windows downloads/checkpoints require NTFS ownership streams and hard links. Keep shared code portable and OS behavior in small adapters. WSL tests count as Linux evidence.
+The v1 release targets are **Linux/amd64 and Windows/amd64**. Linux .deb installers are built on Ubuntu 22.04 for an older glibc baseline; native Windows checks use Windows Server 2022. Ubuntu 26.04.1 with Go 1.26.8 has local runtime evidence. Windows browser acceptance is pending, macOS remains cross-build-only, and ARM64 is pending. Windows downloads/checkpoints require NTFS ownership streams and hard links. Keep shared code portable and OS behavior in small adapters. WSL tests count as Linux evidence.
 
 | Milestone | Scope | Release gate |
 |---|---|---|
@@ -57,10 +57,10 @@ Outside current scope: website login automation, cookies/header credential stora
 | Browser extensions | Plain JavaScript, HTML, CSS, JSON; official WebExtensions APIs | Manifest V3 where supported, browser-specific background/manifest adapters; no initial framework |
 | Native bridge | Go native messaging; Linux Unix sockets; Windows go-winio named pipes | Browser-specific registration and explicit extension-ID allowlists |
 | Windows primitives | `golang.org/x/sys` v0.49.0; `github.com/Microsoft/go-winio` v0.6.4 | Windows-only locks/file IDs/SIDs/ACLs and cancellable local named pipes |
-| Release packaging | Python 3 standard library, POSIX shell, Windows PowerShell, GCC/MinGW windres | Native GitHub Actions builds, versioned archives/checksums, per-user install/uninstall; no hosted runtime |
+| Release packaging | Python 3 standard library, dpkg-deb, Inno Setup 6, POSIX shell, Windows PowerShell, GCC/MinGW windres | Native GitHub Actions builds; .deb system installation and .exe per-user setup; checksums and uninstall; no hosted runtime |
 | Development packaging | Python 3 standard library | Copy extension assets and register selected native hosts; no Python dependency in the running Go app/extension |
 
-Packaging helpers use the Python standard library already available on the development host. Plain shell would make JSON/path handling more fragile; a separate Go packaging command would need another build step for simple file generation. The helpers add no third-party library or running-app dependency. Native host and extension runtime remain Go and plain JavaScript respectively. Windows adds x/sys for maintained Win32 calls and go-winio for cancellable named pipes with explicit ACLs, exclusive first-instance ownership and remote-client rejection. Handwritten syscall/overlapped-I/O code would substantially enlarge the security and cancellation surface; TCP loopback would require a separate authentication design. These dependencies are pinned in both Go modules and do not change Linux transfer behavior.
+Packaging helpers use the Python standard library already available on the development host. Plain shell would make JSON/path handling more fragile; a separate Go packaging command would need another build step for simple file generation. The helpers add no third-party library or running-app dependency. Native host and extension runtime remain Go and plain JavaScript respectively. Windows adds x/sys for maintained Win32 calls and go-winio for cancellable named pipes with explicit ACLs, exclusive first-instance ownership and remote-client rejection. Handwritten syscall/overlapped-I/O code would substantially enlarge the security and cancellation surface; TCP loopback would require a separate authentication design. These dependencies are pinned in both Go modules and do not change Linux transfer behavior. Native installers use dpkg-deb on Linux and Inno Setup 6 on the Windows build runner. Inno supplies a standard setup wizard and uninstall entry with less custom scripting than NSIS; it is a build-time tool, not a downloader runtime dependency. Debian payloads install in /opt/fluxget with system Chrome/Firefox manifests; Windows keeps per-user registration.
 
 New dependencies require a documented need and comparison. JSON was selected over SQLite to keep dependencies small; locking, validation, and atomic replacement remain the application's responsibility. Fyne was selected after a working desktop proof of concept. Keep the current source layout until a concrete boundary justifies restructuring.
 
@@ -95,7 +95,7 @@ Settings are saved only after scheduler acknowledgment; a settings-write failure
 | `desktop/assets/`, `packaging/linux/` | Embedded app icon and Linux launcher template |
 | `.github/workflows/ci.yml`, `release.yml` | CI plus native Linux/Windows release checks, packaging, checksums and joint publication |
 | `internal/winplatform/`, `internal/platformcmd/`, `internal/platformfile/`, `internal/buildinfo/` | Shared Windows primitives, hidden companion consoles, replacement-safe metadata readers and one version source |
-| `packaging/build_release.py`, `packaging/windows/`, `packaging/linux/` | Paired artifacts, app icon, per-user install/uninstall; no browser policy or permission changes |
+| `packaging/build_release.py`, `packaging/windows/`, `packaging/linux/` | Paired .deb/.exe installers, app icon, system Linux/per-user Windows install/uninstall; no browser permission changes |
 
 The engine currently lives in the root `main` package. A future `cmd/` and `internal/` split is optional, not implemented architecture. The browser preview uses `browserbridge/`, `cmd/fluxget-native-host/`, `extensions/`, and the two Python packaging helpers; these do not restructure the transfer engine.
 
