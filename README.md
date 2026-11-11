@@ -96,6 +96,8 @@ Resume uses the same output path and requires a valid saved checkpoint. The stan
 
 ## Development
 
+Release work uses branch `release/v1.0.0`; only version tags publish installers.
+
 The engine and desktop are separate Go modules. Run checks in both:
 
 ```bash
