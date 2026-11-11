@@ -3,9 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/Parsania80/FluxGet/internal/platformcmd"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -185,7 +185,7 @@ func (b *browserIntegration) handle(ctx context.Context, r browserbridge.Request
 					return
 				}
 				v.workResult(func(q *queueClient) (desktopResponse, error) {
-					output, err := exec.Command(v.executable, append([]string{"-suggest-output"}, downloadArgs(r.URL, folder, filename)...)...).Output()
+					output, err := platformcmd.Command(v.executable, append([]string{"-suggest-output"}, downloadArgs(r.URL, folder, filename)...)...).Output()
 					if err != nil {
 						return desktopResponse{}, fmt.Errorf("cannot choose the download folder or filename")
 					}

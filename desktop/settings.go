@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Parsania80/FluxGet/internal/platformfile"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -38,7 +39,7 @@ func loadSpeedSettings() (*speedSettings, error) {
 		return nil, err
 	}
 	s := &speedSettings{path: filepath.Join(dir, "fluxget", "desktop-speed.json"), Overrides: map[string]int64{}, MaxActive: 5, Connections: 4, DisplayUnit: "MB", ManagementMode: "automatic", TotalRequests: 8, OriginRequests: 4}
-	data, err := os.ReadFile(s.path)
+	data, err := platformfile.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return s, s.save()
 	}

@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"os"
+	"github.com/Parsania80/FluxGet/internal/platformfile"
 	"time"
 )
 
@@ -22,7 +22,7 @@ func (l *speedLimiter) liveRate() int64 {
 		return l.bytesPerSecond
 	}
 	l.liveChecked = time.Now()
-	data, err := os.ReadFile(l.live.path)
+	data, err := platformfile.ReadFile(l.live.path)
 	if err != nil || len(data) > 1<<20 {
 		return l.bytesPerSecond
 	}

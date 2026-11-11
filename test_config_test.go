@@ -16,6 +16,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	os.Setenv("XDG_CONFIG_HOME", dir)
+	os.Setenv("APPDATA", dir)
 	os.Setenv("FLUXGET_TEST_CONFIG_ROOT", dir)
 	code := m.Run()
 	os.RemoveAll(dir)

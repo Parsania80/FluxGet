@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 	"github.com/Parsania80/FluxGet/browserbridge"
+	"github.com/Parsania80/FluxGet/internal/buildinfo"
+	"github.com/Parsania80/FluxGet/internal/platformcmd"
 	"image/color"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -34,7 +35,7 @@ func main() {
 	a := app.NewWithID(applicationID)
 	a.SetIcon(appIcon)
 	a.Settings().SetTheme(fluxTheme{theme.DefaultTheme()})
-	w := a.NewWindow("FluxGet")
+	w := a.NewWindow("FluxGet " + buildinfo.Version())
 	w.SetIcon(appIcon)
 	w.Resize(fyne.NewSize(1100, 720))
 	lock, err := lockHistory()
@@ -735,7 +736,7 @@ func (v *downloadsView) addDialog() {
 		prompt.Hide()
 		var destination string
 		v.work(func(q *queueClient) (desktopResponse, error) {
-			output, err := exec.Command(v.executable, append([]string{"-suggest-output"}, downloadArgs(raw, dir, filename)...)...).Output()
+			output, err := platformcmd.Command(v.executable, append([]string{"-suggest-output"}, downloadArgs(raw, dir, filename)...)...).Output()
 			if err != nil {
 				return desktopResponse{}, fmt.Errorf("cannot choose the output path; check the filename and folder")
 			}

@@ -37,7 +37,7 @@ func reconcilePublication(ctx context.Context, path string, c checkpoint, expect
 		(partialInfo != nil && finalInfo != nil && !os.SameFile(partialInfo, finalInfo)) {
 		return 0, errors.New("publication files conflict; all files kept")
 	}
-	file, err := os.OpenFile(anchor, os.O_RDWR, 0)
+	file, err := openPartial(anchor, os.O_RDWR, 0)
 	if err != nil {
 		return 0, fmt.Errorf("open publication file: %w", err)
 	}

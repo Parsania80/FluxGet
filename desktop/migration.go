@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Parsania80/FluxGet/internal/platformfile"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
 func backupDesktopFile(path string) error {
-	data, err := os.ReadFile(path)
+	data, err := platformfile.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}

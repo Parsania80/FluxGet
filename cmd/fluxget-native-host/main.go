@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/Parsania80/FluxGet/internal/platformcmd"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -41,7 +42,15 @@ func run(in io.Reader, out io.Writer, browser string, args []string) error {
 		if err != nil {
 			return err
 		}
-		req.Browser = browser // The registered executable, not page input, selects the browser.
+		// Some Chromium browsers discover Chrome's Windows registration. Do not
+		// silently apply Chrome policy to a request from another browser package.
+		if req.Browser != browser {
+			if err := browserbridge.Write(out, browserbridge.Failure("Native host does not match this browser package")); err != nil {
+				return err
+			}
+			continue
+		}
+		req.Browser = browser // The registered executable selects the browser.
 		var reply browserbridge.Response
 		if err := browserbridge.Validate(req); err != nil {
 			reply = browserbridge.Failure(err.Error())
@@ -51,8 +60,12 @@ func run(in io.Reader, out io.Writer, browser string, args []string) error {
 			if err != nil && !browserbridge.DesktopRunning() {
 				self, e := os.Executable()
 				if e == nil {
-					gui := filepath.Join(filepath.Dir(self), "fluxget-gui")
-					cmd := exec.Command(gui)
+					name := "fluxget-gui"
+					if runtime.GOOS == "windows" {
+						name += ".exe"
+					}
+					gui := filepath.Join(filepath.Dir(self), name)
+					cmd := platformcmd.Command(gui)
 					cmd.Stdout = os.Stderr
 					cmd.Stderr = os.Stderr
 					if cmd.Start() == nil {

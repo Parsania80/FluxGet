@@ -149,7 +149,7 @@ func resumeDownloadWithLimit(ctx context.Context, client *http.Client, destinati
 	if err != nil || !info.Mode().IsRegular() {
 		return 0, errors.New("saved partial file is missing or is not a regular file")
 	}
-	partial, err := os.OpenFile(c.Partial, os.O_RDWR, 0)
+	partial, err := openPartial(c.Partial, os.O_RDWR, 0)
 	if err != nil {
 		return 0, fmt.Errorf("open partial file: %w", err)
 	}

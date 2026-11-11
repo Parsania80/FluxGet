@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/Parsania80/FluxGet/internal/platformfile"
 	"io"
 	"os"
 	"reflect"
@@ -50,7 +51,7 @@ func cleanupQueueJobWithHook(q *queueData, index int, queuePath, action string, 
 	}
 	var partial *os.File
 	if partInfo != nil {
-		partial, err = os.OpenFile(j.Destination+".part", os.O_RDWR, 0)
+		partial, err = openPartial(j.Destination+".part", os.O_RDWR, 0)
 		if err != nil {
 			return false, err
 		}
@@ -89,7 +90,7 @@ func cleanupQueueJobWithHook(q *queueData, index int, queuePath, action string, 
 		if j.ExpectedSHA256 != "" && c.ExpectedSHA256 != "" && !strings.EqualFold(j.ExpectedSHA256, c.ExpectedSHA256) {
 			return false, errors.New("saved checksum differs from queue")
 		}
-		raw, err := os.ReadFile(path)
+		raw, err := platformfile.ReadFile(path)
 		if err != nil {
 			return false, err
 		}
@@ -148,7 +149,7 @@ func cleanupQueueJobWithHook(q *queueData, index int, queuePath, action string, 
 		if err != nil || !os.SameFile(cpInfo, named) {
 			return false, errors.New("checkpoint changed during cleanup")
 		}
-		raw, err = os.ReadFile(path)
+		raw, err = platformfile.ReadFile(path)
 		if err != nil {
 			return false, err
 		}

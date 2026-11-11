@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/Parsania80/FluxGet/internal/buildinfo"
 	"io"
 	"net/http"
 	"os"
@@ -20,6 +21,8 @@ func main() {
 func run(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("fluxget", flag.ContinueOnError)
 	flags.SetOutput(stderr)
+	cancelOnClose := flags.Bool("cancel-on-stdin-close", false, "Cancel a desktop companion transfer when stdin closes")
+	version := flags.Bool("version", false, "Print FluxGet version")
 	rawURL := flags.String("url", "", "Public HTTP or HTTPS file URL")
 	destination := flags.String("out", "", "Destination file (must not already exist)")
 	directory := flags.String("dir", "", "Download directory (default: Downloads)")
@@ -43,6 +46,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 0
 		}
 		return 2
+	}
+	if *version {
+		fmt.Fprintln(stdout, "FluxGet "+buildinfo.Version())
+		return 0
 	}
 	if *connections < 1 || *connections > 16 {
 		fmt.Fprintln(stderr, "-connections must be between 1 and 16.")
@@ -121,6 +128,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	if *cancelOnClose {
+		go func() { _, _ = io.Copy(io.Discard, os.Stdin); stop() }()
+	}
 	client := defaultDownloadClient()
 	limitClient(client, limiter)
 	if *liveFile != "" {

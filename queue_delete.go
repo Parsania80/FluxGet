@@ -45,7 +45,7 @@ func deleteQueueFiles(q *queueData, index int, queuePath string, expected *outpu
 	if !info.Mode().IsRegular() || expected == nil || expected.Path != path {
 		return false, errors.New("output differs from the deletion confirmation; review the file again")
 	}
-	file, err := os.Open(path)
+	file, err := openPartial(path, os.O_RDONLY, 0)
 	if err != nil {
 		return false, err
 	}

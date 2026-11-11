@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Parsania80/FluxGet/internal/platformfile"
 	"io"
 	"net/url"
 	"os"
@@ -227,7 +228,7 @@ func saveCheckpointMeasured(path string, partial *os.File, c checkpoint, hook fu
 
 func loadCheckpoint(path string) (checkpoint, error) {
 	var c checkpoint
-	file, err := os.Open(path)
+	file, err := platformfile.Open(path)
 	if err != nil {
 		return c, fmt.Errorf("open checkpoint: %w", err)
 	}

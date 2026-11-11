@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"unicode"
@@ -44,6 +45,9 @@ func defaultDestination(rawURL, directory, name string) (string, error) {
 }
 
 func safeFilename(name string) bool {
+	if runtime.GOOS == "windows" && !safeWindowsFilename(name) {
+		return false
+	}
 	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, "/\\") && strings.IndexFunc(name, unicode.IsControl) < 0
 }
 
@@ -92,4 +96,22 @@ func downloadsDirectory() (string, error) {
 		}
 	}
 	return filepath.Join(home, "Downloads"), nil
+}
+
+// Windows treats device basenames and alternate streams specially even when
+// an extension is present. Refuse them before any file is opened.
+func safeWindowsFilename(name string) bool {
+	if strings.ContainsAny(name, `<>:"/\|?*`) || strings.HasSuffix(name, ".") || strings.HasSuffix(name, " ") {
+		return false
+	}
+	base := strings.ToUpper(strings.SplitN(name, ".", 2)[0])
+	switch base {
+	case "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$":
+		return false
+	}
+	suffix := strings.TrimPrefix(strings.TrimPrefix(base, "COM"), "LPT")
+	if (strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT")) && len([]rune(suffix)) == 1 && strings.Contains("123456789¹²³", suffix) {
+		return false
+	}
+	return true
 }

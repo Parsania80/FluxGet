@@ -99,7 +99,7 @@ func downloadNamed(ctx context.Context, client *http.Client, rawURL string, dest
 	}
 
 	// Exclusive creation also protects an existing partial file from truncation.
-	partial, err := os.OpenFile(partialPath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	partial, err := openPartial(partialPath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return 0, fmt.Errorf("create partial file: %w", err)
 	}
@@ -112,7 +112,7 @@ func downloadNamed(ctx context.Context, client *http.Client, rawURL string, dest
 	var saved *checkpoint
 	var checkpointPath string
 	var ownership *jobLock
-	if runtime.GOOS == "linux" && response.Request != nil && response.Request.URL != nil {
+	if (runtime.GOOS == "linux" || runtime.GOOS == "windows") && response.Request != nil && response.Request.URL != nil {
 		checkpointPath, err = checkpointLocation(destination)
 		if err != nil {
 			return 0, fmt.Errorf("prepare recovery metadata; partial file kept: %w", err)

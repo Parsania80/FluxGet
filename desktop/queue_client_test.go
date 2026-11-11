@@ -15,8 +15,8 @@ import (
 )
 
 func TestDesktopQueueUsesPersistentCLIScheduler(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	binary := filepath.Join(t.TempDir(), "fluxget")
+	setTestConfig(t, t.TempDir())
+	binary := testBinaryPath(t)
 	build := exec.Command("go", "build", "-o", binary, ".")
 	build.Dir = ".."
 	if output, err := build.CombinedOutput(); err != nil {
@@ -183,8 +183,8 @@ func TestDesktopQueueUsesPersistentCLIScheduler(t *testing.T) {
 }
 
 func TestDesktopQueueRunsJobsConcurrently(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	binary := filepath.Join(t.TempDir(), "fluxget")
+	setTestConfig(t, t.TempDir())
+	binary := testBinaryPath(t)
 	build := exec.Command("go", "build", "-o", binary, ".")
 	build.Dir = ".."
 	if output, err := build.CombinedOutput(); err != nil {

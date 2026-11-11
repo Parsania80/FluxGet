@@ -22,7 +22,7 @@ Keep the CLI, GUI and native hosts together. Register only the browsers you choo
 ## Set up Chrome
 
 1. Open `chrome://extensions`, turn on Developer mode, and choose **Load unpacked**.
-2. Select `dist/extensions/chrome`. Pin FluxGet if desired.
+2. Select `dist/extensions/chrome`, or the installed `extensions/chrome` folder from a v1 package. Pin FluxGet if desired.
 3. Open the updated FluxGet app. In **Settings → Browser downloads**, enable integration and Chrome. Choose **Ask before downloading** or **Download automatically**, then save.
 4. Open the extension popup and enable this browser profile. Approve the one-time permission for all HTTP/HTTPS websites. Manual-only mode does not need website access. Use **Test connection**.
 5. For an already enabled profile, choose **Enable capture for all websites** and approve the browser permission. Reload the page before retrying a download. New sites, download hosts and redirect destinations need no separate grants. To keep selected download hosts in the browser, enter them in FluxGet **Settings → Browser downloads → Excluded hosts**; an entry also covers its subdomains.
@@ -36,7 +36,7 @@ Manual sending uses **right-click a public link → Send link to FluxGet** and a
 
 ## Firefox and Opera
 
-For Firefox development, open `about:debugging#/runtime/this-firefox`, choose **Load Temporary Add-on**, and select `dist/extensions/firefox/manifest.json`. Temporary add-ons are removed when Firefox closes; signing is required for a normal release. Snap/Flatpak Firefox also need the host system's native-messaging portal. A manifest copied to `~/.mozilla/native-messaging-hosts` alone does not establish that the confined browser can reach it.
+For Firefox development, open `about:debugging#/runtime/this-firefox`, choose **Load Temporary Add-on**, and select `dist/extensions/firefox/manifest.json`, or the installed `extensions/firefox/manifest.json` from a v1 package. Temporary add-ons are removed when Firefox closes; signing is required for a normal release. Snap/Flatpak Firefox also need the host system's native-messaging portal. A manifest copied to `~/.mozilla/native-messaging-hosts` alone does not establish that the confined browser can reach it.
 
 For Opera, load the Opera folder from its extensions developer page. Opera registration and behavior must be verified independently on an installed version. Unsupported combinations keep normal browser downloads.
 
@@ -65,3 +65,7 @@ The logic suite covers prepare/cancel/activate ordering, fallback, disable/site-
 The optional Linux native smoke uses the installed Chrome binary with an isolated test profile and documented extension-debugging controls; it keeps browser sandboxing enabled. It tests the real popup/profile consent and native handoff through a query-bearing redirect, checks the exact final query and output, verifies a trusted Ctrl-click redirect stays in Chrome, and checks exact-ID history cleanup plus excluded-host and master-disable browser fallback. Only the copied test manifest pre-grants all-site capture; shipping permissions remain optional and the fixture serves local test files. Run from `desktop/` with `FLUXGET_BROWSER_NATIVE_SMOKE=1 go test -count=1 -race -run '^TestBrowserNativeChromeAcceptance$' -v .`; Set `FLUXGET_BROWSER_NATIVE_MODE=ask` for a separate run that also verifies exactly one destination prompt in Ask first mode. Normal user setup/permission approval remains a separate acceptance step.
 
 Official protocol references: [Chrome native messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging), [Chrome downloads](https://developer.chrome.com/docs/extensions/reference/api/downloads), [Firefox native messaging](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging), and [confined Firefox portal design](https://firefox-source-docs.mozilla.org/toolkit/components/extensions/webextensions/native-messaging-portal-design.html).
+
+## Version 1 packages
+
+Release archives include generated browser folders and matching native hosts. Linux `install.sh` and Windows `Install.cmd` register Chrome and Firefox for the current user. They do not install extensions or approve browser permissions. The Windows app is installed under `%LOCALAPPDATA%\Programs\FluxGet`; Linux uses `~/.local/opt/fluxget`. Load the matching folder under `extensions` using the browser instructions above. Firefox temporary loading lasts until restart; persistent normal Firefox installation requires signing. Store packages and a graphical browser connection wizard are pending. Opera native acceptance remains open; Windows setup intentionally does not register Opera yet.

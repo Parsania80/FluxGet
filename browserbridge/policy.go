@@ -3,6 +3,7 @@ package browserbridge
 import (
 	"encoding/json"
 	"errors"
+	"github.com/Parsania80/FluxGet/internal/platformfile"
 	"io"
 	"net/url"
 	"os"
@@ -36,7 +37,7 @@ func OpenStore() (*Store, error) {
 		return nil, err
 	}
 	s := &Store{path: filepath.Join(dir, "browser-integration.json"), policy: Policy{Version: Version, Mode: "ask", Browsers: map[string]bool{}, Profiles: map[string]Profile{}}}
-	f, err := os.Open(s.path)
+	f, err := platformfile.Open(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return s, nil
 	}

@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Parsania80/FluxGet/internal/platformfile"
 	"io"
 	"net/url"
-	"os"
 	"time"
 )
 
@@ -120,7 +120,7 @@ func (a *automaticController) readLimits(ctx context.Context) bool {
 	if path == "" {
 		return false
 	}
-	file, err := os.Open(path)
+	file, err := platformfile.Open(path)
 	var data []byte
 	if err == nil {
 		data, err = io.ReadAll(io.LimitReader(file, (1<<20)+1))

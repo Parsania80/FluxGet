@@ -15,8 +15,8 @@ import (
 )
 
 func TestDownloadUsesExistingCLI(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	binary := filepath.Join(t.TempDir(), "fluxget")
+	setTestConfig(t, t.TempDir())
+	binary := testBinaryPath(t)
 	build := exec.Command("go", "build", "-o", binary, ".")
 	build.Dir = ".."
 	if output, err := build.CombinedOutput(); err != nil {
@@ -40,8 +40,8 @@ func TestDownloadUsesExistingCLI(t *testing.T) {
 }
 
 func TestExistingServerFilenameIsAnnouncedWithoutOverwrite(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	binary := filepath.Join(t.TempDir(), "fluxget")
+	setTestConfig(t, t.TempDir())
+	binary := testBinaryPath(t)
 	build := exec.Command("go", "build", "-o", binary, ".")
 	build.Dir = ".."
 	if output, err := build.CombinedOutput(); err != nil {
@@ -70,8 +70,8 @@ func TestExistingServerFilenameIsAnnouncedWithoutOverwrite(t *testing.T) {
 }
 
 func TestPausedDownloadCanResume(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	binary := filepath.Join(t.TempDir(), "fluxget")
+	setTestConfig(t, t.TempDir())
+	binary := testBinaryPath(t)
 	build := exec.Command("go", "build", "-o", binary, ".")
 	build.Dir = ".."
 	if output, err := build.CombinedOutput(); err != nil {
@@ -142,8 +142,8 @@ func TestPausedDownloadCanResume(t *testing.T) {
 }
 
 func TestStopInterruptsCLI(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	binary := filepath.Join(t.TempDir(), "fluxget")
+	setTestConfig(t, t.TempDir())
+	binary := testBinaryPath(t)
 	build := exec.Command("go", "build", "-o", binary, ".")
 	build.Dir = ".."
 	if output, err := build.CombinedOutput(); err != nil {

@@ -305,6 +305,12 @@ func killCleanupAtStage(t *testing.T, stage string) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("cleanup stage not reached")
 	}
+	// The child prints readiness before SIGSTOP takes effect. Wait for the
+	// stopped state so it cannot finish the cleanup before the parent kills it.
+	var status syscall.WaitStatus
+	if _, err := syscall.Wait4(cmd.Process.Pid, &status, syscall.WUNTRACED, nil); err != nil || !status.Stopped() {
+		t.Fatalf("wait for cleanup crash stop: %v status=%v", err, status)
+	}
 	if err := cmd.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}

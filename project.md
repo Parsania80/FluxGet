@@ -2,7 +2,7 @@
 
 FluxGet is a Go download manager inspired by IDM. The priorities are reliable transfers, understandable desktop controls, optional browser integration, and later experimental multi-interface downloading. It is also a learning and portfolio project for Go, concurrency, networking, persistence, and recovery.
 
-**Status — 2026-11-10:** Linux CLI and Fyne desktop prototypes are implemented. Automatic stages 1–4 are committed in `956a9e8`; broader stage 5 acceptance remains open. A Linux browser-integration preview now implements the native bridge, per-browser/profile settings, manual sending, and opt-in capture. Chrome 157 native handoff/fallback passed; Firefox Snap and Opera native acceptance remain open. Multi-interface downloading is not implemented. The v0.1 engine release and detailed interactive desktop acceptance remain open.
+**Status — 2026-11-11:** Preparing operator-requested **v1.0.0** packages for Linux/amd64 and Windows/amd64. Windows adapters now implement file ownership/identity, NTFS ownership markers, parallel/checkpoint operation, desktop companion cancellation, and a private named-pipe browser bridge. Local Linux engine/desktop logic checks, native Chrome acceptance and Windows CLI/GUI/host cross-builds pass; native Windows runtime CI and browser acceptance are not yet claimed. Chrome Linux browser capture is implemented and tested; Firefox/Opera acceptance, Automatic stage 5, and multi-interface downloading remain open.
 
 This file describes current decisions and remaining work. [README.md](README.md) is the simple user guide, [BENCHMARKS.md](BENCHMARKS.md) records measured workloads, and [SESSION-LOG.md](SESSION-LOG.md) preserves development history. Implementation does not by itself mean release acceptance has passed.
 
@@ -20,30 +20,30 @@ Keep these priorities while continuing engine release verification alongside pro
 | 6 | Chrome capture and integration settings | 🔄 Current | Preview implemented; real popup consent, capture and master-disable fallback tested; normal setup/permission review remains |
 | 7 | Firefox and Opera rollout | ⬜ Todo | Manifests and shared implementation prepared; package-specific native verification is pending |
 | 8 | Browser packaging and acceptance | ⬜ Todo | Stable extension IDs, distribution, repair/uninstall, privacy, crash tests |
-| 9 | Remaining v0.1 engine release checks | ⬜ Todo | Resource bounds, packaged artifacts, native environments, evidence review |
+| 9 | v1.0.0 Windows/Linux release | 🔄 Current | Versioned archives, per-user setup, native Windows regressions and publishing gate; publication pending |
 | 10 | Multi-interface experiment | ⬜ Todo | Prove routing, correct output, failover, and benefit on independent uplinks |
 | 11 | Authenticated browser downloads | ⬜ Todo | Separate consent, credential, request-replay, and recovery design |
 
-### ➡️ Current: #6 — Chrome browser integration preview
+### ➡️ Current: #9 — v1.0.0 Windows/Linux release
 
-### ⏭️ Next: #6–7 — Normal browser setup and Firefox/Opera native acceptance
+### ⏭️ Next: #7–8 — Windows/Linux browser acceptance and store distribution
 
-**Next concrete work:** Load/approve the unpacked Chrome extension through the normal browser setup UI, approve one-time all-website access and verify a public download, then test Firefox Snap portal consent/registration and an installed Opera version. Broader browser crash/security/distribution acceptance and Automatic stage 5 comparisons remain open alongside this user-selected browser work.
+**Next concrete work:** Verify local paired builds and packaged installation, push the prepared commit through the operator's GitHub Desktop sign-in, and run the release workflow on native Linux/Windows runners. The first v1.0.0 main push tags and publishes automatically only after both native jobs pass; existing releases are never replaced. Later versions require explicit tags. Then perform operator browser acceptance on Windows and another Linux installation. Store submissions/signing and a graphical per-browser setup remain separate work.
 
 ## Product scope and release boundaries
 
-The first target is **Linux/amd64**. Ubuntu 26.04.1 with Go 1.26.8 has local runtime evidence. Windows/macOS CLI cross-builds pass, but native behavior is not verified; ARM64 is also pending. Keep shared code portable and OS behavior in small adapters. WSL tests count as Linux evidence.
+The v1 release targets are **Linux/amd64 and Windows/amd64**. Linux archives are built on Ubuntu 22.04 for an older glibc baseline; native Windows checks use Windows Server 2022. Ubuntu 26.04.1 with Go 1.26.8 has local runtime evidence. Windows browser acceptance is pending, macOS remains cross-build-only, and ARM64 is pending. Windows downloads/checkpoints require NTFS ownership streams and hard links. Keep shared code portable and OS behavior in small adapters. WSL tests count as Linux evidence.
 
 | Milestone | Scope | Release gate |
 |---|---|---|
-| v0.1: Reliable Download Engine | CLI, HTTP/HTTPS, queue, parallel ranges, conditional resume, recovery, optional SHA-256, resource limits | Reproducible correctness/failure tests and packaged native smoke tests |
+| v1.0.0: First desktop release (supersedes planned v0.1 naming) | CLI, HTTP/HTTPS, queue, parallel ranges, conditional resume, recovery, optional SHA-256, resource limits | Reproducible correctness/failure tests and packaged native smoke tests |
 | Desktop, parallel track | One Downloads list, shared settings, Automatic/Manual, migration, batch actions | Preserved user data and interactive acceptance |
 | Browser integration, parallel track | Optional Chrome/Firefox/Opera extensions and local native host | Tested handoff, browser fallback, per-browser consent, installation matrix |
-| v0.2: Multi-interface experiment | Explicit network paths on one selected OS | Correct egress, output, and failover on independent real uplinks |
-| v0.3: Broader interface support | Remaining OS adapters | Native capability and privilege matrix |
+| Later: Multi-interface experiment | Explicit network paths on one selected OS | Correct egress, output, and failover on independent real uplinks |
+| Later: Broader interface support | Remaining OS adapters | Native capability and privilege matrix |
 | Later | Authenticated browser downloads and adaptive interface scheduling | Separate security, replay, and routing designs |
 
-Desktop and browser work precede multi-interface development without expanding the v0.1 engine gate. There are no fixed release dates or claims of complete IDM parity, guaranteed acceleration, or uninterrupted browsing.
+Desktop and browser work precede multi-interface development while retaining the engine correctness requirements. There are no fixed release dates or claims of complete IDM parity, guaranteed acceleration, or uninterrupted browsing.
 
 Outside current scope: website login automation, cookies/header credential storage, media extraction, streaming assembly, torrents, FTP/SFTP, cloud sync, remote administration, and automatic updates. Operator-approved query-string/CDN URLs are supported without cookie/header replay; expiry and single-use recovery are not guaranteed. No hosted service, database server, account system, or public control API is required. Scheduled queues, mirrors, notifications, metered-network controls, and a background service remain optional future work with a demonstrated need.
 
@@ -51,14 +51,16 @@ Outside current scope: website login automation, cookies/header credential stora
 
 | Area | Selected technology | Boundary |
 |---|---|---|
-| Engine and CLI | Go 1.26 baseline; standard library | Root module `github.com/Parsania80/FluxGet` |
+| Engine and CLI | Go 1.26 baseline; standard library plus Windows adapters below | Root module `github.com/Parsania80/FluxGet` |
 | Desktop | Go 1.26.8; Fyne v2.8.2 and pinned dependencies | Separate `desktop/go.mod` and `desktop/go.sum`; no replacement UI framework |
 | Persistence | Versioned local JSON | Queue schemas 1/2 remain readable; first browser handoff uses backed-up schema 3; checkpoints remain v4; no database |
 | Browser extensions | Plain JavaScript, HTML, CSS, JSON; official WebExtensions APIs | Manifest V3 where supported, browser-specific background/manifest adapters; no initial framework |
-| Native bridge | Go standard library, native messaging, private local IPC | Browser-specific registration and explicit extension-ID allowlists |
+| Native bridge | Go native messaging; Linux Unix sockets; Windows go-winio named pipes | Browser-specific registration and explicit extension-ID allowlists |
+| Windows primitives | `golang.org/x/sys` v0.49.0; `github.com/Microsoft/go-winio` v0.6.4 | Windows-only locks/file IDs/SIDs/ACLs and cancellable local named pipes |
+| Release packaging | Python 3 standard library, POSIX shell, Windows PowerShell, GCC/MinGW windres | Native GitHub Actions builds, versioned archives/checksums, per-user install/uninstall; no hosted runtime |
 | Development packaging | Python 3 standard library | Copy extension assets and register selected native hosts; no Python dependency in the running Go app/extension |
 
-Packaging helpers use the Python standard library already available on the development host. Plain shell would make JSON/path handling more fragile; a separate Go packaging command would need another build step for simple file generation. The helpers add no third-party library or running-app dependency. Native host and extension runtime remain Go and plain JavaScript respectively.
+Packaging helpers use the Python standard library already available on the development host. Plain shell would make JSON/path handling more fragile; a separate Go packaging command would need another build step for simple file generation. The helpers add no third-party library or running-app dependency. Native host and extension runtime remain Go and plain JavaScript respectively. Windows adds x/sys for maintained Win32 calls and go-winio for cancellable named pipes with explicit ACLs, exclusive first-instance ownership and remote-client rejection. Handwritten syscall/overlapped-I/O code would substantially enlarge the security and cancellation surface; TCP loopback would require a separate authentication design. These dependencies are pinned in both Go modules and do not change Linux transfer behavior.
 
 New dependencies require a documented need and comparison. JSON was selected over SQLite to keep dependencies small; locking, validation, and atomic replacement remain the application's responsibility. Fyne was selected after a working desktop proof of concept. Keep the current source layout until a concrete boundary justifies restructuring.
 
@@ -91,7 +93,9 @@ Settings are saved only after scheduler acknowledgment; a settings-write failure
 | `measurements.go`, `hardware*.go`, `resource_guard.go`, `storage_observations*.go`, `transfer_buffers.go` | Runtime observations and resource controls |
 | `desktop/` | Fyne Downloads/Settings, companion client, migration, units, history, batch controls |
 | `desktop/assets/`, `packaging/linux/` | Embedded app icon and Linux launcher template |
-| `.github/workflows/ci.yml` | Formatting, tests, vet, desktop/Linux builds, CLI cross-builds |
+| `.github/workflows/ci.yml`, `release.yml` | CI plus native Linux/Windows release checks, packaging, checksums and joint publication |
+| `internal/winplatform/`, `internal/platformcmd/`, `internal/platformfile/`, `internal/buildinfo/` | Shared Windows primitives, hidden companion consoles, replacement-safe metadata readers and one version source |
+| `packaging/build_release.py`, `packaging/windows/`, `packaging/linux/` | Paired artifacts, app icon, per-user install/uninstall; no browser policy or permission changes |
 
 The engine currently lives in the root `main` package. A future `cmd/` and `internal/` split is optional, not implemented architecture. The browser preview uses `browserbridge/`, `cmd/fluxget-native-host/`, `extensions/`, and the two Python packaging helpers; these do not restructure the transfer engine.
 
@@ -101,7 +105,7 @@ The engine currently lives in the root `main` package. A future `cmd/` and `inte
 
 - Accept public direct HTTP/HTTPS URLs. Verify TLS, allow up to nine redirects, and reject HTTPS-to-HTTP downgrade. Treat headers and filenames as untrusted; explicit names take precedence over safe server names and URL fallbacks.
 - Stream to an exclusively created `.part` file. Unknown-length responses have byte progress without invented percentages. Reject unexpected statuses, truncated bodies, invalid ranges, changed representations, and unsupported range transformations.
-- Eligible Linux files of at least 1 MiB can use parallel ranges after a strong-ETag/range probe. Validate each actual response's range, total, validator, and body length; never write a full response blindly at a range offset. Unsupported servers use a fresh sequential stream.
+- Eligible Linux/Windows files of at least 1 MiB can use parallel ranges after a strong-ETag/range probe. Validate each actual response's range, total, validator, and body length; never write a full response blindly at a range offset. Unsupported servers use a fresh sequential stream.
 - Publish only after required synchronization, close, and verification. Final publication uses a same-directory hard link and does not overwrite an existing destination. Failure keeps the partial file; hard-link support is required.
 - Standalone downloads accept an optional trusted expected SHA-256 checksum. Streaming/prefix digests and server validators do not replace that trust check. Queue checksum input remains unimplemented.
 - HTTP 408, 429, 500, 502, 503, 504 and selected transient network failures may retry, subject to safe resume. Permanent validation/storage failures follow their error path rather than being tuned around.
@@ -130,7 +134,7 @@ The engine currently lives in the root `main` package. A future `cmd/` and `inte
 | Remove from list | Keep files; archive the entry so checkpoint discovery does not recreate it |
 | Delete files | Confirm separately, stop writers, validate ownership/identity, report individual failures |
 
-Automatic partial cleanup requires the recorded Linux inode identity, valid saved hashes where applicable, and a random user extended-attribute ownership marker. Legacy/unmarked data requires manual inspection. Completed deletion checks the confirmed path/device/inode/size/mtime and rejects symlinks and conflicts. Replacement downloads a separate copy and verifies the original before replacement; it is not permission to overwrite an arbitrary file.
+Automatic partial cleanup requires recorded file identity, valid saved hashes where applicable, and a random ownership marker (Linux user extended attribute; Windows NTFS alternate stream). Windows opens transfer files with delete sharing, refuses leaf reparse points, and locks a byte beyond valid file data so mandatory locks do not block worker writes. Legacy/unmarked data requires manual inspection. Completed deletion checks the confirmed path/device/inode/size/mtime and rejects symlinks and conflicts. Replacement downloads a separate copy and verifies the original before replacement; it is not permission to overwrite an arbitrary file.
 
 Persisted queue states include queued, running, paused, failed, completed, canceled, and resetting. Runtime snapshots distinguish connecting, downloading, verification, retry/budget waits, and retirement. Future state-model changes must document mutable-field ownership and migration.
 
@@ -226,7 +230,7 @@ Owned buffers allocate lazily after reservation, wait cancelably if exhausted, a
 
 **Goal:** Capture supported browser downloads into the same Downloads list when enabled, with independent Chrome/Firefox/Opera controls and a reliable browser fallback. Begin on Linux/amd64 after the selected Automatic foundations and desktop acceptance.
 
-**Implemented architecture:** WebExtension -> browser native messaging -> small Go host -> private local IPC -> single desktop/scheduler owner. Linux uses a private 0700 runtime directory, 0600 Unix socket, same-UID peer checks and exclusive ownership; other OSes return Unsupported. The extension owns browser download operations; the desktop owns jobs and integration policy. Native hosts must not start competing queue owners.
+**Implemented architecture:** WebExtension -> browser native messaging -> small Go host -> private local IPC -> single desktop/scheduler owner. Linux uses a private 0700 runtime directory, 0600 Unix socket, same-UID peer checks and exclusive ownership; Windows uses a SID-scoped local named pipe with a protected current-user ACL, remote-client rejection, exclusive ownership, and peer process-SID checks; other OSes return Unsupported. The extension owns browser download operations; the desktop owns jobs and integration policy. Native hosts must not start competing queue owners.
 
 Native messaging avoids a public listener and gives explicit extension identities, but needs per-browser/package registration. Localhost HTTP is an alternative only if a documented environment makes native messaging unsuitable; it adds port/authentication/origin/lifecycle work. A custom URL scheme can support explicit links but cannot alone provide general capture.
 
@@ -259,6 +263,10 @@ Effective readiness requires master, browser, profile consent, and extension rea
 - Installed Firefox is **158.0.1 Snap**; the WebExtensions portal is present, but host launch/consent and capture are not yet natively verified. Opera is not installed. Shared source and generated folders do not establish native support for either. Store signing/distribution, broader browser failures/crashes, private browsing and authenticated inputs remain open.
 
 Build, registration, setup, limits and uninstall instructions are in [extensions/README.md](extensions/README.md). Generated folders live under ignored `dist/extensions/`; the installer registers only explicitly selected browsers and does not install extensions or edit browser profile databases. Checkpoints and current Automatic behavior are unchanged.
+
+**Recommended consumer installation (2026-11-11; proposed, not implemented):** Replace unpacked/manual extension setup with a packaged desktop installer that installs the native hosts and browser registrations, plus a first-run per-browser Connect screen. Finalize production extension IDs and matching native allowlists before publishing store packages. Prefer Chrome Web Store distribution and Mozilla-signed AMO distribution; verify Opera independently. Chrome supports installer-assisted external installation using a preferences JSON on Linux and a registry/preferences entry on Windows/macOS; Linux installation can be automatic, while Windows/macOS require enable confirmation. For normal Firefox, link to the signed AMO add-on for user-approved installation. Provide a store-link fallback, permission/profile connection and actual native readiness checks, plus repair/uninstall and updates. Do not promise silent installation across every browser/OS or use managed-device policies as a consumer installer shortcut. Linux self-hosted/local CRX installation is an alternative when store distribution is unavailable, with signing-key custody, stable identity and update hosting required. Browser/Snap/Flatpak acceptance remains a release gate.
+
+Distribution references: [Chrome installer-assisted installation](https://developer.chrome.com/docs/extensions/how-to/distribute/install-extensions), [Firefox desktop companion add-ons](https://extensionworkshop.com/documentation/publish/distribute-for-desktop-apps/), [Firefox signing/distribution](https://extensionworkshop.com/documentation/publish/signing-and-distribution-overview/).
 
 ### Delivery order and handoff contract
 
@@ -315,7 +323,7 @@ The stage-4 full CLI/desktop race suites passed, alongside vet/builds/cross-buil
 
 Recorded 2026-11-05 measurements include loopback workloads, ext4/tmpfs, throttled servers, cancellation, and an independently compared 30.9 MB internet download. See BENCHMARKS for conditions; these do not establish publisher authenticity, real-network acceleration, or total memory bounds. Historical local release candidates are not the current published release.
 
-### Remaining v0.1 release gate
+### Remaining engine acceptance (carried into v1)
 
 - [ ] Reconcile requirement evidence with current behavior; finish explicit lifecycle/error/diagnostic contracts where incomplete.
 - [ ] Complete native packaged smoke tests, including pause/recovery/cancel/output and the supported filesystem/environment matrix.
@@ -351,7 +359,7 @@ The race detector needs a supported platform and C compiler; desktop builds need
 | `-sha256 HEX` | Optional trusted expected checksum for standalone download |
 | `-resume -out FILE` | Resume/reconcile a saved job; no new URL |
 | `-list` | Read-only saved-job discovery; completed queue history is separate |
-| `-queue` | Persistent Linux queue; explicit `start` begins eligible work |
+| `-queue` | Persistent Linux/Windows queue; explicit `start` begins eligible work |
 | `-max-active N` | Queue file ceiling, 1–64, default 5 |
 | `-connections N` | Worker ceiling, 1–16, default 4 |
 | `-speed-limit N` | KiB/s, zero unlimited; shared across queue jobs |

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Parsania80/FluxGet/internal/platformfile"
 	"io"
 	"net/url"
 	"os"
@@ -59,7 +60,7 @@ func validQueueURL(raw string) bool {
 
 func loadQueue(path string) (queueData, error) {
 	q := queueData{Version: 2, NextID: 1}
-	f, err := os.Open(path)
+	f, err := platformfile.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return q, nil
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Parsania80/FluxGet/internal/platformfile"
 	"os"
 	"path/filepath"
 )
@@ -43,7 +44,7 @@ func backupQueue(path string) error {
 	return backupQueueNamed(path, ".before-unified")
 }
 func backupQueueNamed(path, suffix string) error {
-	data, err := os.ReadFile(path)
+	data, err := platformfile.ReadFile(path)
 	if err != nil {
 		return err
 	}

@@ -4,10 +4,11 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/Parsania80/FluxGet/internal/platformcmd"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -37,7 +38,11 @@ func cliPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(filepath.Dir(executable), "fluxget"), nil
+	name := "fluxget"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return filepath.Join(filepath.Dir(executable), name), nil
 }
 
 func discoverSavedJobs(existing []job) ([]job, error) {
@@ -45,7 +50,7 @@ func discoverSavedJobs(existing []job) ([]job, error) {
 	if err != nil {
 		return existing, err
 	}
-	output, err := exec.Command(executable, "-list").Output()
+	output, err := platformcmd.Command(executable, "-list").Output()
 	if err != nil {
 		return existing, fmt.Errorf("list saved downloads: %w", err)
 	}
@@ -77,8 +82,13 @@ func mergeSavedJobs(existing []job, output string) []job {
 }
 
 func runDownload(ctx context.Context, executable string, args []string, update func(string)) error {
-	cmd := exec.CommandContext(ctx, executable, args...)
-	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	cmd := platformcmd.CommandContext(ctx, executable, append(args, "-cancel-on-stdin-close")...)
+	input, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	cmd.Cancel = input.Close
 	cmd.WaitDelay = 15 * time.Second
 	reader, writer := io.Pipe()
 	cmd.Stdout, cmd.Stderr = writer, writer
@@ -99,7 +109,7 @@ func runDownload(ctx context.Context, executable string, args []string, update f
 		}
 		done <- scanner.Err()
 	}()
-	err := cmd.Wait()
+	err = cmd.Wait()
 	writer.Close()
 	scanErr := <-done
 	reader.Close()

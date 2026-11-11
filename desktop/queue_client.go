@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Parsania80/FluxGet/internal/platformcmd"
 	"io"
-	"os/exec"
 	"strings"
 	"sync"
 )
@@ -34,7 +34,7 @@ func startConfiguredQueue(executable string, maxActive, connections int, speedLi
 	if settingsPath != "" {
 		args = append(args, "-live-speed-file", settingsPath)
 	}
-	cmd := exec.Command(executable, args...)
+	cmd := platformcmd.Command(executable, args...)
 	input, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

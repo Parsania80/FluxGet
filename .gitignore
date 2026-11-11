@@ -12,3 +12,5 @@
 /fluxget.exe
 *.part
 /dist/
+/desktop/fluxget_windows_amd64.syso
+__pycache__/

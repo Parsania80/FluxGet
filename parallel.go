@@ -75,7 +75,7 @@ func downloadFresh(ctx context.Context, client *http.Client, rawURL, destination
 
 func downloadFreshNamed(ctx context.Context, client *http.Client, rawURL string, destinationPtr *string, checksum string, progress io.Writer, connections int, resolve func(http.Header) error) (int64, error) {
 	destination := *destinationPtr
-	if connections <= 1 || runtime.GOOS != "linux" {
+	if connections <= 1 || (runtime.GOOS != "linux" && runtime.GOOS != "windows") {
 		return downloadNamed(ctx, client, rawURL, destinationPtr, checksum, progress, resolve)
 	}
 	if ctx == nil || client == nil {
@@ -149,7 +149,7 @@ func parallelDownload(ctx context.Context, client *http.Client, rawURL, destinat
 	if err != nil {
 		return 0, err
 	}
-	partial, err := os.OpenFile(absolute+".part", os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
+	partial, err := openPartial(absolute+".part", os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
 	if err != nil {
 		return 0, fmt.Errorf("create partial file: %w", err)
 	}

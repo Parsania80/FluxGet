@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Parsania80/FluxGet/internal/platformfile"
 	"io"
 	"os"
 	"path/filepath"
@@ -41,7 +42,7 @@ func loadHistory() ([]job, error) {
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.Open(path)
+	f, err := platformfile.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}

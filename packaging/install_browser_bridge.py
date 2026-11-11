@@ -19,7 +19,10 @@ args = parser.parse_args()
 if not sys.platform.startswith('linux'):
     parser.error('This registration helper currently supports Linux only')
 config = Path(os.environ.get('XDG_CONFIG_HOME', Path.home()/'.config'))
-manifest = json.loads((ROOT/'extensions/manifest.chrome.json').read_text())
+manifest_path = ROOT/'extensions/manifest.chrome.json'
+if not manifest_path.exists():
+    manifest_path = ROOT/'extensions/chrome/manifest.json'
+manifest = json.loads(manifest_path.read_text())
 digest = hashlib.sha256(base64.b64decode(manifest['key'])).hexdigest()[:32]
 chrome_id = ''.join(chr(97+int(c,16)) for c in digest)
 locations = {'chrome': config/'google-chrome/NativeMessagingHosts',
