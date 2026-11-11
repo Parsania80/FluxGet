@@ -4,7 +4,7 @@
 
 FluxGet is a download manager written in Go. It helps you manage several downloads, control their speed, and continue saved downloads after an interruption when the server allows it.
 
-**Version 1.0.0 is being prepared for Linux and Windows (64-bit Intel/AMD).** Publishing waits for checks on both operating systems; a failed check keeps the release unpublished while fixes are verified. Windows browser capture and other Linux distributions still need hands-on testing. macOS is not included.
+**Version 1.0.0 is being prepared for Linux and Windows (64-bit Intel/AMD).** Publishing waits for checks on both operating systems; a failed check keeps the release unpublished while fixes are verified. Release packages are built on native Linux and Windows runners only when a version tag such as `v1.0.0` is pushed. Branch pushes run checks without publishing packages. Windows browser capture and other Linux distributions still need hands-on testing. macOS is not included.
 
 ## What you can do
 
@@ -23,10 +23,10 @@ On Linux, Automatic also watches CPU, memory, and storage pressure and reduces w
 
 Get the package for your system from [GitHub Releases](https://github.com/Parsania80/FluxGet/releases).
 
-- **Windows:** Extract the ZIP and double-click **Install.cmd**. Open FluxGet from the new shortcut. Use NTFS for downloads and saved progress.
-- **Linux:** Extract the TAR.GZ and run `sh install.sh` inside it. Python 3 is needed for setup. Open FluxGet from the applications menu.
+- **Windows:** Open `fluxget-1.0.0-windows-amd64-setup.exe` and follow the setup wizard. Open FluxGet from its new shortcut. Use NTFS for downloads and saved progress.
+- **Debian/Ubuntu Linux:** Run `sudo dpkg -i fluxget_1.0.0_amd64.deb`, then open FluxGet from the applications menu. If dependencies are missing, `sudo apt install ./fluxget_1.0.0_amd64.deb` installs them too.
 
-Release packages include the app, engine, browser hosts, and extension folders. See the included release notes for system requirements and testing limits. Keep the package files together if running without installation.
+Both installers include the app, engine, browser hosts, and extension folders. See the release notes for system requirements and testing limits.
 
 ## Build and open the desktop app
 
@@ -58,9 +58,9 @@ Removing an item from the list keeps its files. Deleting files is a separate act
 
 ## Browser downloads
 
-Browser setup currently uses a development extension. The recommended release setup is a normal FluxGet installer that configures the local bridge and guides you through connecting your browser; end users should not need Developer mode or folder selection. The v1 packages install the app and register Chrome/Firefox hosts; store distribution and the browser connection wizard are still pending.
+Browser setup currently uses a development extension. The recommended release setup is a normal FluxGet installer that configures the local bridge and guides you through connecting your browser; end users should not need Developer mode or folder selection. The v1 installers install the app and register Chrome/Firefox hosts; store distribution and the browser connection wizard are still pending.
 
-See [browser setup](extensions/README.md) to build/register the bridge and load the extension. Open `chrome://extensions`, turn on Developer mode, and **Load unpacked** from the installed `extensions/chrome` folder. On Linux this is normally `~/.local/opt/fluxget/extensions/chrome`; on Windows it is `%LOCALAPPDATA%\Programs\FluxGet\extensions\chrome`. Select the folder itself. In FluxGet **Settings → Browser downloads**, enable integration and your browser. Then enable your profile in the extension popup.
+See [browser setup](extensions/README.md) to build/register the bridge and load the extension. Open `chrome://extensions`, turn on Developer mode, and **Load unpacked** from the installed `extensions/chrome` folder. With the Linux `.deb` this is `/opt/fluxget/extensions/chrome`; on Windows it is `%LOCALAPPDATA%\Programs\FluxGet\extensions\chrome`. Select the folder itself. In FluxGet **Settings → Browser downloads**, enable integration and your browser. Then enable your profile in the extension popup.
 
 Choose **Download automatically** for capture, or **Ask before downloading** to confirm each file. Approve website access once when enabling the profile, or choose **Enable capture for all websites** in the popup. Reload the page before retrying. New websites need no separate setup; the same capture rules apply across websites, with no special handling for individual download sites. To keep downloads from certain hosts in your browser, add them to **Settings → Browser downloads → Excluded hosts**; subdomains are included. You can disable capture globally, per browser/profile, or temporarily. You can also right-click a public link and choose **Send link to FluxGet**.
 
@@ -95,6 +95,8 @@ Resume uses the same output path and requires a valid saved checkpoint. The stan
 - Power-loss recovery is not guaranteed. Full release and interactive desktop acceptance are still in progress.
 
 ## Development
+
+Release work uses branch `release/v1.0.0`; only version tags publish installers.
 
 The engine and desktop are separate Go modules. Run checks in both:
 
