@@ -76,8 +76,8 @@ jobs:
           go test -race -count=1 -v -run '^TestWindows' ./... 2>&1 | tee "$RUNNER_TEMP/fluxget-windows-tests.log"
           go vet ./...
           cd desktop
-          go test -race -count=1 -v -run '^(TestDownloadUsesExistingCLI|TestPausedDownloadCanResume|TestDesktopQueueUsesPersistentCLIScheduler)$' . 2>&1 | tee -a "$RUNNER_TEMP/fluxget-windows-tests.log"
-          go vet ./...
+          go test -race -tags ci -count=1 -v -run '^(TestDownloadUsesExistingCLI|TestPausedDownloadCanResume|TestDesktopQueueUsesPersistentCLIScheduler)$' . 2>&1 | tee -a "$RUNNER_TEMP/fluxget-windows-tests.log"
+          go vet -tags ci ./...
       - name: Report native Windows test errors
         if: failure() && runner.os == 'Windows'
         run: |
