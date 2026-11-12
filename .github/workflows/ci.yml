@@ -37,12 +37,12 @@ jobs:
         run: |
           export FLUXGET_MEDIA_TOOLS="$RUNNER_TEMP/fluxget-media-tools/tools.json"
           go test -race -count=1 -v ./media ./networkproxy
-          go test -race -count=1 -v -run '^(TestQueueProxy|TestProxyRoute|TestStandaloneCLIProxy|TestBrowserProxy)' .
+          go test -race -count=1 -v -run '^(TestQueueProxy|TestProxyRoute|TestStandaloneCLIProxy|TestBrowserProxy|TestMediaQueue)' .
           go vet ./media ./networkproxy ./cmd/fluxget-media-spike
           go run ./cmd/fluxget-media-spike -tools "$FLUXGET_MEDIA_TOOLS" -mode probe
-      - name: Native proxy desktop controls
+      - name: Native proxy and YouTube desktop controls
         working-directory: desktop
-        run: go test -race -tags ci -count=1 -v -run '^TestProxy' .
+        run: go test -race -tags ci -count=1 -v -run '^(TestProxy|TestYouTube)' .
 
   linux:
     name: Linux amd64

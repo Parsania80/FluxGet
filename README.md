@@ -6,7 +6,7 @@ FluxGet is a download manager written in Go. It helps you manage several downloa
 
 **[Version 1.0.0 is available for Linux and Windows (64-bit Intel/AMD).](https://github.com/Parsania80/FluxGet/releases/tag/v1.0.0)** Native checks and installer verification passed on both operating systems. Release packages are built only when a version tag such as `v1.0.0` is pushed. Branch pushes run checks without publishing packages. Windows browser capture and other Linux distributions still need hands-on testing. macOS is not included.
 
-**In development for the next version:** YouTube video and playlist downloads with quality and format choices. The media backend spike is implemented, but this feature is not available in the app yet. Public video information was tested through a proxy; full public video downloads and Windows media checks are still pending. See the [YouTube roadmap](project.md#youtube-videos-and-playlists--next-release-plan).
+**In development for the next version:** YouTube video and playlist downloads with quality and format choices. Development builds can download a single YouTube video or audio track from the YouTube tab into the Downloads list. Playlists are coming later. Public audio downloading and MP3 conversion passed through a proxy; public video downloads and Windows media checks are still pending. See the [YouTube roadmap](project.md#youtube-videos-and-playlists--next-release-plan).
 
 ## What you can do
 
@@ -66,7 +66,15 @@ In **Settings → Proxy**, enter the listening address from v2ray or another pro
 
 Choose **Use proxy by default for new downloads** and click **Save settings**, or leave the default off and check **Download with proxy** when adding just one file. Each download has a **Proxy** or **Direct** button. Pause it before changing that choice, apply, then resume. Turning the option off uses Direct; changing the default does not reroute existing downloads.
 
-A failed proxy reports an error and never falls back to Direct automatically. SOCKS5 sends destination names to the proxy for DNS resolution. Direct ignores proxy environment variables and uses the operating system's normal network route. The YouTube development probe also accepts `-proxy`; its app UI is still pending.
+A failed proxy reports an error and never falls back to Direct automatically. YouTube pages and media files use different servers, and your browser may route requests differently from FluxGet. A media timeout alone does not prove your proxy is broken; compare the configured route and media-tool behavior before choosing a fix. Trying another proxy server is one troubleshooting step. SOCKS5 sends destination names to the proxy for DNS resolution. Direct ignores proxy environment variables and uses the operating system's normal network route. The YouTube tab can use the same configured proxy for analysis and downloading; its development command also accepts `-proxy`.
+
+## YouTube preview
+
+Available in development builds; not included in v1.0.0.
+
+Open **YouTube**, paste a public video or Shorts link, and choose **Analyze**. You can cancel analysis or use your configured proxy. Choose **Video** or **Audio only**, an available format and quality, then a folder and filename. Click **Download** to start it in the Downloads list. Use the usual pause, resume and speed controls there. Unfinished jobs reopen paused; damaged or unverified saved media may require **Restart media from beginning**. Playlists are coming later.
+
+The locally installed preview includes the prepared media tools beside the app. Other development builds need these tools configured. If they are not configured, expand **Media tools — development preview** and choose their `tools.json` manifest. See the [development setup and roadmap](project.md#youtube-videos-and-playlists--next-release-plan). A full public audio-to-MP3 download passed on Linux. Native Windows media execution and public video/merge checks remain pending.
 
 ## Browser downloads
 

@@ -83,6 +83,7 @@ func main() {
 
 type downloadsView struct {
 	browsers                                                 *browserIntegration
+	youtube                                                  *youtubeView
 	managementNote                                           *widget.Label
 	app                                                      fyne.App
 	window                                                   fyne.Window
@@ -218,6 +219,9 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 		} else if j.State == "running" && j.Requests != nil && j.Requests.Active == 0 && j.Requests.Waiting > 0 {
 			details = "Waiting for a connection slot  ·  " + downloadDetails(j, v.settings.DisplayUnit)
 		}
+		if j.Media != nil && j.State == "running" && j.MediaPhase != "download" {
+			details = j.Activity
+		}
 		box.Objects[1].(*widget.Label).SetText(details)
 		value, known := progressValue(j.Progress)
 		if !known && j.SavedProgress != nil {
@@ -275,11 +279,30 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 	top := container.NewPadded(container.NewVBox(title, v.summary, v.managementNote, toolbar, selectionBar, widget.NewSeparator()))
 	downloads := container.NewBorder(top, nil, nil, nil, split)
 	settings.applyDownloads = v.applySettings
-	settingsPage := settings.page(w, func() { v.refresh() }, func() bool { return v.ready && !v.busy && !v.closing })
+	v.youtube = newYouTubeView(w, settings, executable)
+	settingsPage := settings.page(w, func() {
+		v.refresh()
+		v.youtube.proxyNote.SetText(proxyDefaultDescription(settings.Proxy))
+		if v.youtube.video.ID != "" {
+			v.youtube.selectionChanged()
+		}
+	}, func() bool { return v.ready && !v.busy && !v.closing })
 	if scroll, ok := settingsPage.(*container.Scroll); ok {
 		scroll.Content = container.NewVBox(scroll.Content, v.browsers.page())
 	}
-	tabs := container.NewAppTabs(container.NewTabItemWithIcon("Downloads", theme.DownloadIcon(), downloads), container.NewTabItemWithIcon("Settings", theme.SettingsIcon(), settingsPage))
+	tabs := container.NewAppTabs(container.NewTabItemWithIcon("Downloads", theme.DownloadIcon(), downloads), container.NewTabItemWithIcon("YouTube", theme.MediaVideoIcon(), v.youtube.content), container.NewTabItemWithIcon("Settings", theme.SettingsIcon(), settingsPage))
+	v.youtube.canDownload = func() bool { return v.ready && !v.busy && !v.closing }
+	v.youtube.submit = func(entry queueEntry, finish func(error)) {
+		v.workResult(func(q *queueClient) (desktopResponse, error) {
+			return callDesktop(q, desktopRequest{Operation: "add", Job: entry})
+		}, func(response desktopResponse) {
+			finish(nil)
+			v.filters.SetSelected("All downloads")
+			v.selected = fmt.Sprintf("queue:%d", response.JobID)
+			tabs.SelectIndex(0)
+			v.status.SetText("YouTube download added.")
+		}, finish)
+	}
 	v.content = container.NewBorder(nil, container.NewPadded(container.NewBorder(nil, nil, nil, v.reconnect, v.status)), nil, nil, tabs)
 	categories.SetSelected("All downloads")
 	v.refresh()
@@ -296,6 +319,9 @@ func (v *downloadsView) selection() (downloadRow, bool) {
 	return downloadRow{}, false
 }
 func (v *downloadsView) actions() {
+	if v.youtube != nil {
+		v.youtube.updateDownloadEnabled()
+	}
 	for _, button := range []*widget.Button{v.pause, v.resume, v.retry, v.open, v.folder, v.more, v.remove, v.selectAll, v.clearSelection} {
 		button.Disable()
 	}
@@ -353,7 +379,7 @@ func (v *downloadsView) refresh() {
 	rows := v.rows()
 	for i, row := range rows {
 		height := v.rowBase
-		if len(row.Entry.Segments) > 0 || row.Entry.State == "running" || row.Entry.State == "paused" {
+		if row.Entry.Media == nil && (len(row.Entry.Segments) > 0 || row.Entry.State == "running" || row.Entry.State == "paused") {
 			height += theme.Padding() + v.partHeader
 			if n := len(row.Entry.Segments); n > 0 {
 				lines := (n + 3) / 4
@@ -665,7 +691,20 @@ func (v *downloadsView) moreActions() {
 			}
 		}, v.window)
 	})
-	menu := widget.NewPopUpMenu(fyne.NewMenu("Downloads", cancel, remove, deleteFiles, fyne.NewMenuItemSeparator(), discard), v.window.Canvas())
+	items := []*fyne.MenuItem{cancel, remove, deleteFiles, fyne.NewMenuItemSeparator(), discard}
+	if len(rows) == 1 && rows[0].Entry.Media != nil && (rows[0].Entry.State == "paused" || rows[0].Entry.State == "failed" || rows[0].Entry.State == "canceled") {
+		row := rows[0]
+		items = append(items, fyne.NewMenuItem("Restart media from beginning…", func() {
+			dialog.ShowConfirm("Restart this download?", "Verified scratch files will be removed. Unvalidated scratch is kept for inspection. This starts the selected format again from the beginning.", func(yes bool) {
+				if yes {
+					v.work(func(q *queueClient) (desktopResponse, error) {
+						return callDesktop(q, desktopRequest{Operation: "action", Action: "restart", Job: queueEntry{ID: row.Entry.ID}})
+					}, nil)
+				}
+			}, v.window)
+		}))
+	}
+	menu := widget.NewPopUpMenu(fyne.NewMenu("Downloads", items...), v.window.Canvas())
 	menu.ShowAtPosition(v.app.Driver().AbsolutePositionForObject(v.more).Add(fyne.NewPos(0, v.more.Size().Height)))
 }
 func (v *downloadsView) close(done func()) {
@@ -673,6 +712,9 @@ func (v *downloadsView) close(done func()) {
 		return
 	}
 	v.closing = true
+	if v.youtube != nil {
+		v.youtube.shutdown()
+	}
 	v.closeDone = done
 	v.status.SetText("Saving progress before closing…")
 	v.refresh()
@@ -699,6 +741,10 @@ func (v *downloadsView) stopService() {
 }
 func (v *downloadsView) finishClose() {
 	if v.closeDone != nil && len(v.finishing) == 0 {
+		if v.youtube != nil && v.youtube.busy {
+			v.youtube.onIdle = v.finishClose
+			return
+		}
 		done := v.closeDone
 		v.closeDone = nil
 		done()

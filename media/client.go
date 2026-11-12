@@ -128,6 +128,7 @@ func (c *Client) Analyze(ctx context.Context, rawURL string) (Video, error) {
 }
 
 type Progress struct {
+	FormatID   string  `json:"format_id,omitempty"`
 	Phase      string  `json:"phase"`
 	Downloaded int64   `json:"downloaded_bytes"`
 	Total      int64   `json:"total_bytes,omitempty"`
@@ -138,6 +139,7 @@ type Progress struct {
 // DownloadOptions is immutable for a run. Stage 3 must restart/pause a run to
 // change its cap; this spike does not claim live or shared-engine speed limits.
 type DownloadOptions struct {
+	Workspace           string          // Optional existing job-owned workspace, validated by its queue owner.
 	Directory           string          // Existing absolute scratch parent; creates a private child.
 	LimitBytesPerSecond int64           // Zero means unlimited. One fragment/transfer only.
 	Events              chan<- Progress // Nonblocking, lossy display updates; never state authority.
@@ -175,14 +177,22 @@ func (c *Client) download(ctx context.Context, video Video, selection Selection,
 		return Result{}, err
 	}
 	defer release()
-	workspace, err := os.MkdirTemp(options.Directory, "fluxget-media-")
+	workspace := options.Workspace
+	if workspace == "" {
+		workspace, err = os.MkdirTemp(options.Directory, "fluxget-media-")
+	} else {
+		info, e := os.Lstat(workspace)
+		if e != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || !filepath.IsAbs(workspace) || filepath.Dir(workspace) != filepath.Clean(options.Directory) {
+			err = errors.New("invalid owned media workspace")
+		}
+	}
 	if err != nil {
-		return Result{}, errors.New("cannot create private media workspace")
+		return Result{}, errors.New("cannot open private media workspace")
 	}
 	result := Result{Workspace: workspace}
 	// Only the extension is a template; percent signs in user paths are literal.
 	outputTemplate := filepath.Join(strings.ReplaceAll(workspace, "%", "%%"), "asset.%(ext)s")
-	args := append(c.baseArgs(), "--quiet", "--progress", "--newline", "--progress-delta", "0.2", "--concurrent-fragments", "1", "--downloader", "native", "--no-overwrites", "--format", selector, "--output", outputTemplate, "--print", "before_dl:FG_PHASE:download", "--print", "after_move:FG_RESULT:%(filepath)j", "--progress-template", `download:FG_PROGRESS:{"downloaded_bytes":%(progress.downloaded_bytes|0)s,"total_bytes":%(progress.total_bytes|0)s,"total_bytes_estimate":%(progress.total_bytes_estimate|0)s,"speed":%(progress.speed|0)s,"eta":%(progress.eta|0)s}`, "--progress-template", `postprocess:FG_POST:{"postprocessor":%(progress.postprocessor)j,"status":%(progress.status)j}`)
+	args := append(c.baseArgs(), "--quiet", "--progress", "--newline", "--progress-delta", "0.2", "--concurrent-fragments", "1", "--downloader", "native", "--no-overwrites", "--continue", "--format", selector, "--output", outputTemplate, "--print", "before_dl:FG_PHASE:download", "--print", "after_move:FG_RESULT:%(filepath)j", "--progress-template", `download:FG_PROGRESS:{"format_id":%(info.format_id)j,"downloaded_bytes":%(progress.downloaded_bytes|0)s,"total_bytes":%(progress.total_bytes|0)s,"total_bytes_estimate":%(progress.total_bytes_estimate|0)s,"speed":%(progress.speed|0)s,"eta":%(progress.eta|0)s}`, "--progress-template", `postprocess:FG_POST:{"postprocessor":%(progress.postprocessor)j,"status":%(progress.status)j}`)
 	if options.LimitBytesPerSecond > 0 {
 		args = append(args, "--limit-rate", strconv.FormatInt(options.LimitBytesPerSecond, 10))
 	}
@@ -221,14 +231,18 @@ func (c *Client) download(ctx context.Context, video Video, selection Selection,
 	if err := inspection.validate(video.Duration, selection); err != nil {
 		return result, err
 	}
+	if err := inspection.matchesSelection(video, selection); err != nil {
+		return result, err
+	}
 	result.Output, result.Inspection = expected, inspection
 	return result, nil
 }
 
 type Stream struct {
-	Kind   string `json:"codec_type"`
-	Codec  string `json:"codec_name"`
-	Height int    `json:"height,omitempty"`
+	Kind      string `json:"codec_type"`
+	Codec     string `json:"codec_name"`
+	Height    int    `json:"height,omitempty"`
+	FrameRate string `json:"r_frame_rate,omitempty"`
 }
 
 type Inspection struct {
@@ -242,7 +256,7 @@ type Inspection struct {
 func (c *Client) inspect(ctx context.Context, file string) (Inspection, error) {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	data, err := capture(ctx, c.tools.FFprobe, []string{"-v", "error", "-show_entries", "stream=codec_type,codec_name,height:format=format_name,duration", "-of", "json", file}, filepath.Dir(file), 1<<20)
+	data, err := capture(ctx, c.tools.FFprobe, []string{"-v", "error", "-show_entries", "stream=codec_type,codec_name,height,r_frame_rate:format=format_name,duration", "-of", "json", file}, filepath.Dir(file), 1<<20)
 	if err != nil {
 		return Inspection{}, err
 	}
@@ -273,6 +287,63 @@ func (i Inspection) validate(duration float64, selection Selection) error {
 	formats := map[string]string{"mp4": "mov,mp4,m4a,3gp,3g2,mj2", "m4a": "mov,mp4,m4a,3gp,3g2,mj2", "webm": "matroska,webm", "mkv": "matroska,webm", "opus": "ogg", "mp3": "mp3"}
 	if i.Format.Name != formats[selection.Container] {
 		return errors.New("media output container does not match selection")
+	}
+	return nil
+}
+
+func codecFamily(codec string) string {
+	codec = strings.ToLower(strings.SplitN(codec, ".", 2)[0])
+	switch codec {
+	case "avc1", "avc3":
+		return "h264"
+	case "mp4a":
+		return "aac"
+	case "av01":
+		return "av1"
+	case "vp09":
+		return "vp9"
+	case "hvc1", "hev1":
+		return "hevc"
+	}
+	return codec
+}
+
+func (i Inspection) matchesSelection(video Video, selection Selection) error {
+	var selectedVideo, selectedAudio Format
+	for _, format := range video.Formats {
+		if format.ID == selection.VideoFormat {
+			selectedVideo = format
+			if selection.AudioFormat == "" {
+				selectedAudio = format
+			}
+		}
+		if format.ID == selection.AudioFormat {
+			selectedAudio = format
+		}
+	}
+	for _, stream := range i.Streams {
+		if stream.Kind == "video" {
+			if stream.Codec != codecFamily(selectedVideo.VideoCodec) || selectedVideo.Height > 0 && stream.Height != selectedVideo.Height {
+				return errors.New("media video codec or resolution does not match selection")
+			}
+			if selectedVideo.FPS > 0 {
+				numerator, denominator, ok := strings.Cut(stream.FrameRate, "/")
+				n, e1 := strconv.ParseFloat(numerator, 64)
+				d, e2 := strconv.ParseFloat(denominator, 64)
+				if !ok || e1 != nil || e2 != nil || !(d > 0) || !(n > 0) || math.IsInf(n, 0) || math.IsInf(d, 0) || math.Abs(n/d-selectedVideo.FPS) > math.Max(0.1, selectedVideo.FPS*0.01) {
+					return errors.New("media frame rate does not match selection")
+				}
+			}
+		}
+		if stream.Kind == "audio" {
+			expected := codecFamily(selectedAudio.AudioCodec)
+			if selection.Container == "mp3" {
+				expected = "mp3"
+			}
+			if stream.Codec != expected {
+				return errors.New("media audio codec does not match selection")
+			}
+		}
 	}
 	return nil
 }

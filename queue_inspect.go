@@ -9,6 +9,11 @@ import (
 
 // inspectQueueJob reports local metadata only; resume still validates the data and server.
 func inspectQueueJob(output io.Writer, j queueJob) {
+	if j.Media != nil {
+		fmt.Fprintf(output, "YouTube media: %s · %s · %s\n", j.Media.Video.ID, j.Media.Selection.Container, j.State)
+		fmt.Fprintln(output, "Saved media is managed by this queue; resume checks tools, selected formats and local file integrity.")
+		return
+	}
 	fmt.Fprintf(output, "Job %d: %s, output %q\n", j.ID, j.State, j.Destination)
 	if j.State == "resetting" && j.Cleanup != nil {
 		fmt.Fprintf(output, "Cleanup interrupted: repeat %s %d.\n", j.Cleanup.Action, j.ID)

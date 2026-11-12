@@ -2,11 +2,14 @@ package main
 
 import (
 	"fmt"
+	"github.com/Parsania80/FluxGet/media"
 	"github.com/Parsania80/FluxGet/networkproxy"
 	"strings"
 )
 
 type queueEntry struct {
+	Media           *media.Job           `json:"media,omitempty"`
+	MediaPhase      string               `json:"media_phase,omitempty"`
 	Proxy           *networkproxy.Config `json:"proxy,omitempty"`
 	BrowserPending  bool                 `json:"browser_pending,omitempty"`
 	IntakeID        string               `json:"browser_intake_id,omitempty"`
@@ -62,6 +65,20 @@ func downloadState(state string) string {
 }
 
 func (j queueEntry) displayState() string {
+	if j.Media != nil && j.State == "running" {
+		switch j.MediaPhase {
+		case "checking":
+			return "Checking"
+		case "processing":
+			return "Processing"
+		case "saving", "publishing":
+			return "Verifying"
+		case "budget", "limit":
+			return "Waiting"
+		default:
+			return "Downloading"
+		}
+	}
 	if j.State == "running" && j.Activity != "" {
 		switch j.Activity {
 		case "Checking transfer method":
@@ -113,7 +130,11 @@ func downloadRows(entries []queueEntry, history []job, category string) []downlo
 		if index >= 0 && history[index].State == "Needs attention" {
 			entry.State, entry.Message = "Needs attention", history[index].Message
 		}
-		if jobVisible(category, entry.displayState()) {
+		filterState := entry.displayState()
+		if entry.Media != nil && entry.State == "running" && filterState != "Waiting" {
+			filterState = "Downloading"
+		}
+		if jobVisible(category, filterState) {
 			rows = append(rows, downloadRow{fmt.Sprintf("queue:%d", entry.ID), entry, index})
 		}
 	}

@@ -32,7 +32,7 @@ func TestMain(m *testing.M) {
 			return
 		case "-v":
 			container := "mov,mp4,m4a,3gp,3g2,mj2"
-			streams := `[{"codec_type":"video","codec_name":"h264"},{"codec_type":"audio","codec_name":"aac"}]`
+			streams := `[{"codec_type":"video","codec_name":"h264","height":1080},{"codec_type":"audio","codec_name":"aac"}]`
 			if strings.HasSuffix(os.Args[len(os.Args)-1], ".mp3") {
 				container = "mp3"
 				streams = `[{"codec_type":"audio","codec_name":"mp3"}]`
@@ -50,6 +50,9 @@ func helper(args []string) {
 		fmt.Print(strings.Repeat("x", 2<<20))
 	case "error":
 		fmt.Fprintln(os.Stderr, "https://cdn.invalid/file?secret=TOKEN")
+		if len(args) > 1 {
+			fmt.Fprintln(os.Stderr, args[1])
+		}
 		os.Exit(17)
 	case "tree", "exit-tree":
 		child := exec.Command(os.Args[0], "media-helper", "ticker", args[1])
@@ -239,6 +242,39 @@ func TestToolErrorsAndOutputLimitAreRedacted(t *testing.T) {
 	}
 }
 
+func TestToolFailureDiagnosticsAreActionableAndPrivate(t *testing.T) {
+	for _, tc := range []struct{ raw, want string }{
+		{"Read timed out. (read timeout=15.0)", "Media connection timed out"},
+		{"HTTP Error 403: Forbidden", "media server denied access"},
+		{"HTTP Error 429: Too Many Requests", "limiting requests"},
+		{"Connection refused", "check that your proxy is running"},
+		{"Requested format is not available", "choose another format"},
+		{"This video is unavailable", "video is unavailable"},
+		{"No space left on device", "Not enough disk space"},
+		{"ffprobe and ffmpeg not found", "tools are missing"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			d := &toolDiagnostic{}
+			// Exercise split writes and a large prefix without retaining raw logs.
+			d.Write(bytes.Repeat([]byte("x"), 16000))
+			raw := "https://cdn.invalid/private?secret=TOKEN\n" + tc.raw + "\npassword=SECRET"
+			for _, b := range []byte(raw) {
+				d.Write([]byte{b})
+			}
+			message := (&ToolError{ExitCode: 1, reason: d.reason()}).Error()
+			if len(d.tail) > 8192 || !strings.Contains(message, tc.want) || strings.Contains(message, "TOKEN") || strings.Contains(message, "SECRET") || strings.Contains(message, "cdn.invalid") {
+				t.Fatalf("unsafe or unhelpful diagnostic: %q", message)
+			}
+		})
+	}
+	exe, _ := os.Executable()
+	err := run(t.Context(), exe, []string{"media-helper", "error", "Read timed out; proxy=https://user:SECRET@proxy.invalid/?token=TOKEN"}, "", io.Discard, 1024)
+	var tool *ToolError
+	if !errors.As(err, &tool) || tool.ExitCode != 17 || !strings.Contains(err.Error(), "Media connection timed out") || strings.Contains(err.Error(), "TOKEN") || strings.Contains(err.Error(), "SECRET") {
+		t.Fatalf("subprocess diagnostic: %v", err)
+	}
+}
+
 func TestProcessTreeCancellationAndNormalExit(t *testing.T) {
 	for _, mode := range []string{"tree", "exit-tree"} {
 		t.Run(mode, func(t *testing.T) {
@@ -286,5 +322,17 @@ func TestInspectionRejectsFalseSuccess(t *testing.T) {
 	}
 	if i.validate(30, Selection{Container: "mp3"}) == nil || i.validate(3, Selection{Container: "mp4", VideoFormat: "137"}) == nil {
 		t.Fatal("invalid output passed inspection")
+	}
+}
+
+func TestFractionalFragmentEstimateIsSupported(t *testing.T) {
+	events := make(chan Progress, 1)
+	parser := newProgressParser(events)
+	if _, err := parser.Write([]byte("FG_PROGRESS:{\"format_id\":\"137\",\"downloaded_bytes\":100,\"total_bytes_estimate\":1000.75,\"speed\":32,\"eta\":1}\n")); err != nil {
+		t.Fatal(err)
+	}
+	event := <-events
+	if event.Total != 1000 || event.FormatID != "137" {
+		t.Fatal("fragment estimate or format counter lost", event)
 	}
 }

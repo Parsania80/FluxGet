@@ -9,6 +9,11 @@ import (
 // File deletion stays with the queue owner after all job writers have stopped.
 func deleteQueueFiles(q *queueData, index int, queuePath string, expected *outputRemoval) (bool, error) {
 	j := q.Jobs[index]
+	if j.Media != nil && j.State == "completed" {
+		if err := cleanupMediaRecord(j, false); err != nil {
+			return false, err
+		}
+	}
 	if j.State != "completed" {
 		return cleanupQueueJob(q, index, queuePath, "discard")
 	}

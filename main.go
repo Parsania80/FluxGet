@@ -20,6 +20,9 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 1 && args[0] == "-media-worker" {
+		return runMediaWorker(os.Stdin, stdout)
+	}
 	flags := flag.NewFlagSet("fluxget", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	cancelOnClose := flags.Bool("cancel-on-stdin-close", false, "Cancel a desktop companion transfer when stdin closes")

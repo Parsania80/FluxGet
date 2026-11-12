@@ -42,6 +42,9 @@ func remainingTimeWithSpeed(message string, speed float64) string {
 }
 
 func downloadSpeed(j queueEntry, unit string) string {
+	if j.Media != nil && j.MediaPhase != "download" {
+		return "Speed: —"
+	}
 	if downloadState(j.State) != "Downloading" {
 		return "Speed: —"
 	}

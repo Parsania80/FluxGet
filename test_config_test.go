@@ -7,6 +7,12 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	if queueMediaTestTool() {
+		return
+	}
+	if len(os.Args) == 2 && os.Args[1] == "-media-worker" {
+		os.Exit(runMediaWorker(os.Stdin, os.Stdout))
+	}
 	if os.Getenv("FLUXGET_TEST_CONFIG_ROOT") != "" {
 		os.Exit(m.Run())
 	}

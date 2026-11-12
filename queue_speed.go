@@ -40,7 +40,8 @@ func (s *queueSpeed) current(now time.Time) float64 {
 }
 
 type desktopEntry struct {
-	BrowserPending bool `json:"browser_pending,omitempty"`
+	MediaPhase     string `json:"media_phase,omitempty"`
+	BrowserPending bool   `json:"browser_pending,omitempty"`
 	queueJob
 	Storage         *storageView `json:"storage,omitempty"`
 	AutomaticReason string       `json:"automatic_reason,omitempty"`

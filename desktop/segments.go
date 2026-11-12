@@ -97,6 +97,10 @@ func newSegmentPanel() *fyne.Container {
 	return container.NewVBox(container.NewBorder(nil, nil, nil, widget.NewButton("Parts…", nil), summary), container.NewGridWithColumns(4))
 }
 func updateSegmentPanel(panel *fyne.Container, j queueEntry, show func()) {
+	if j.Media != nil {
+		panel.Hide()
+		return
+	}
 	if len(j.Segments) == 0 && j.State != "running" && j.State != "paused" {
 		panel.Hide()
 		return

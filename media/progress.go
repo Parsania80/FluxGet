@@ -53,20 +53,24 @@ func (p *progressParser) line(line string) error {
 	switch {
 	case strings.HasPrefix(line, "FG_PROGRESS:"):
 		var raw struct {
+			FormatID   string  `json:"format_id"`
 			Status     string  `json:"status"`
 			Downloaded int64   `json:"downloaded_bytes"`
-			Total      int64   `json:"total_bytes"`
-			Estimate   int64   `json:"total_bytes_estimate"`
+			Total      float64 `json:"total_bytes"`
+			Estimate   float64 `json:"total_bytes_estimate"`
 			Speed      float64 `json:"speed"`
 			ETA        float64 `json:"eta"`
 		}
-		if json.Unmarshal([]byte(strings.TrimPrefix(line, "FG_PROGRESS:")), &raw) != nil || raw.Downloaded < 0 || raw.Total < 0 || raw.Estimate < 0 || raw.Speed < 0 || math.IsNaN(raw.Speed) || math.IsInf(raw.Speed, 0) || raw.ETA < 0 {
+		if json.Unmarshal([]byte(strings.TrimPrefix(line, "FG_PROGRESS:")), &raw) != nil || raw.Downloaded < 0 || raw.Total < 0 || raw.Estimate < 0 || raw.Total >= float64(math.MaxInt64) || raw.Estimate >= float64(math.MaxInt64) || raw.Speed < 0 || math.IsNaN(raw.Speed) || math.IsInf(raw.Speed, 0) || raw.ETA < 0 {
 			return errors.New("invalid structured media progress")
 		}
 		if raw.Total == 0 {
 			raw.Total = raw.Estimate
 		}
-		p.emit(Progress{Phase: "download", Downloaded: raw.Downloaded, Total: raw.Total, Speed: raw.Speed, ETA: raw.ETA})
+		if raw.FormatID != "" && !formatID.MatchString(raw.FormatID) {
+			return errors.New("invalid media format counter")
+		}
+		p.emit(Progress{FormatID: raw.FormatID, Phase: "download", Downloaded: raw.Downloaded, Total: int64(raw.Total), Speed: raw.Speed, ETA: raw.ETA})
 	case line == "FG_PHASE:download":
 		p.emit(Progress{Phase: "download"})
 	case line == "FG_PHASE:processing":

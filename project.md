@@ -2,7 +2,7 @@
 
 FluxGet is a Go download manager inspired by IDM. The priorities are reliable transfers, understandable desktop controls, optional browser integration, and later experimental multi-interface downloading. It is also a learning and portfolio project for Go, concurrency, networking, persistence, and recovery.
 
-**Status — 2026-11-12:** [v1.0.0 is published](https://github.com/Parsania80/FluxGet/releases/tag/v1.0.0) for Linux/amd64 and Windows/amd64; [release verification](https://github.com/Parsania80/FluxGet/actions/runs/43024303927) passed native checks and installer gates. The next release's isolated media backend spike is implemented and passes real Linux fixture transfers; native Windows and public YouTube acceptance remain open. YouTube UI, playlists and persistent media jobs are not implemented, and the next version number is undecided. The current development checkout is `main`. Windows browser acceptance, Firefox/Opera acceptance, Automatic stage 5, and multi-interface downloading remain open.
+**Status — 2026-11-12:** [v1.0.0 is published](https://github.com/Parsania80/FluxGet/releases/tag/v1.0.0) for Linux/amd64 and Windows/amd64; [release verification](https://github.com/Parsania80/FluxGet/actions/runs/43024303927) passed native checks and installer gates. The next release's isolated media backend spike is implemented and passes real Linux fixture transfers; native Windows and broader public YouTube acceptance remain open; a full public audio-to-MP3 transfer now passes through the unchanged proxy. Single-video selection and stage-3 persistent media jobs are implemented and installed as a Linux preview; playlists are not implemented, and the next version number is undecided. The current development checkout is `main`. Windows browser acceptance, Firefox/Opera acceptance, Automatic stage 5, and multi-interface downloading remain open.
 
 This file describes current decisions and remaining work. [README.md](README.md) is the simple user guide, [BENCHMARKS.md](BENCHMARKS.md) records measured workloads, and [SESSION-LOG.md](SESSION-LOG.md) preserves development history. Implementation does not by itself mean release acceptance has passed.
 
@@ -23,14 +23,14 @@ Keep these priorities while continuing engine release verification alongside pro
 | 9 | v1.0.0 Windows/Linux release | ✅ Done | Native .deb/.exe installers and checksums published after native test and installer gates; broader browser acceptance remains open |
 | 10 | Multi-interface experiment | ⬜ Todo | Prove routing, correct output, failover, and benefit on independent uplinks |
 | 11 | Authenticated browser downloads | ⬜ Todo | Separate consent, credential, request-replay, and recovery design |
-| 12 | YouTube videos and playlists | 🔄 Current | Stage 1 adapter/dependency spike implemented; real Linux fixture pipeline passed; native Windows/public YouTube acceptance pending before UI and persistent jobs |
+| 12 | YouTube videos and playlists | 🔄 Current | Stages 1–3 implemented; single-video queue preview installed; native Windows/full public-transfer acceptance remains open; playlists next |
 | 13 | Optional proxy routing per download | ✅ Done | Settings default, per-download Proxy/Direct controls, HTTP/HTTPS/SOCKS5, browser-intake defaults, CLI and media adapter; native Windows acceptance still required |
 
-### ➡️ Current: #12, stage 1 — Media backend spike and native acceptance
+### ➡️ Current: #12 — Stage 3 download preview installed; native/public acceptance open
 
-### ⏭️ Next: #12 — Finish native/public acceptance, then stage 2 selection UI
+### ⏭️ Next: #12 — Test the installed preview, then stage 4 playlist selection
 
-**Next concrete work:** Run the prepared Windows media CI job and verify a full public-YouTube media transfer through the working proxy. Public metadata extraction, the local transfer contract, generated MP4 merge, MP3 conversion, rate ceiling and process-tree cancellation are verified; they do not prove public media transfer or Windows runtime behavior. Build the single-video selection UI after these gates pass. Retain existing browser acceptance and store-distribution tasks. Only numeric `vMAJOR.MINOR.PATCH` tags matching the source version build/publish packages; branch pushes run ordinary CI. Preserve the published v1.0.0 tag and assets.
+**Next concrete work:** Run the prepared Windows media CI job and verify a full public-YouTube video/merge transfer. Public metadata and a complete audio-to-MP3 transfer passed through the unchanged proxy; generated MP4 merge, rate ceiling and process-tree cancellation are also verified. These checks do not prove public video/merge or Windows runtime behavior. The operator approved stages 2–3 while these checks remain pending. Test the installed single-video Download flow before expanding to playlists; do not treat open acceptance checks as passed. Retain existing browser acceptance and store-distribution tasks. Only numeric `vMAJOR.MINOR.PATCH` tags matching the source version build/publish packages; branch pushes run ordinary CI. Preserve the published v1.0.0 tag and assets.
 
 ## Product scope and release boundaries
 
@@ -96,7 +96,7 @@ Settings are saved only after scheduler acknowledgment; a settings-write failure
 | `queue*.go`, `cleanup*.go` | Persistent queue, desktop protocol, transitions, deletion, snapshots |
 | `adaptive.go`, `automatic_queue.go`, `request_budget.go`, `worker_control.go` | Pure policy, live coordination, request leases, safe worker targets |
 | `measurements.go`, `hardware*.go`, `resource_guard.go`, `storage_observations*.go`, `transfer_buffers.go` | Runtime observations and resource controls |
-| `desktop/` | Fyne Downloads/Settings, companion client, migration, units, history, batch controls |
+| `desktop/` | Fyne Downloads/YouTube/Settings, companion client, migration, units, history, batch controls; youtube.go handles metadata lifecycle and queue submission; youtube_selection.go handles selection and destination validation |
 | `desktop/assets/`, `packaging/linux/` | Embedded app icon and Linux launcher template |
 | `.github/workflows/ci.yml`, `release.yml` | CI plus native Linux/Windows release checks, packaging, checksums and joint publication |
 | `internal/winplatform/`, `internal/platformcmd/`, `internal/platformfile/`, `internal/buildinfo/` | Shared Windows primitives, hidden companion consoles, replacement-safe metadata readers and one version source |
@@ -316,7 +316,7 @@ Browser acceptance remains open:
 
 ## YouTube videos and playlists — next release plan
 
-**Requested 2026-11-12; stage 1 spike implemented, full feature not available.** Add an explicit YouTube intake to the existing Downloads experience. Start with completed, public videos and finite playlists accessible without a login. Support standard watch links, `youtu.be` links, Shorts and playlist links. A watch link containing a playlist must ask **This video** or **Choose from playlist**, defaulting to the single video. Do not start a playlist merely because its ID is in the URL. The development probe deliberately handles only that single video; it rejects playlist-only URLs.
+**Requested 2026-11-12; stages 1–3 implemented as a single-video download preview; playlists and release acceptance remain open.** Add an explicit YouTube intake to the existing Downloads experience. Start with completed, public videos and finite playlists accessible without a login. Support standard watch links, `youtu.be` links, Shorts and playlist links. A watch link containing a playlist must ask **This video** or **Choose from playlist**, defaulting to the single video. Do not start a playlist merely because its ID is in the URL. The development probe deliberately handles only that single video; it rejects playlist-only URLs.
 
 ### Backend choice and dependency boundary
 
@@ -330,19 +330,19 @@ yt-dlp owns extraction and media transfer; FFmpeg/ffprobe handle merging, conver
 
 Current YouTube extraction also needs EJS scripts and a supported JavaScript runtime. Plan for pinned Deno and locally supplied, compatible EJS components; validate the selected standalone artifact's contents instead of assuming it contains every dependency. See [upstream EJS setup](https://github.com/yt-dlp/yt-dlp/wiki/EJS). This adds a media-tool runtime boundary; the existing Go engine and browser native host do not gain a Python runtime requirement.
 
-The spike resolves explicit absolute tool paths, probes native versions and rejects missing tools; there is no PATH search or self-updater. A Python standard-library helper downloads SHA-256-locked standalone tools into an explicit development directory. On the current host these are under `/tmp/fluxget-media-tools`, not installed system-wide or shipped in v1 installers. Go modules/dependencies remain unchanged. Production dependency installation/notices remain a later release gate.
+The spike resolves explicit absolute tool paths, probes native versions and rejects missing tools; there is no PATH search or self-updater. A Python standard-library helper downloads SHA-256-locked standalone tools into an explicit development directory. On the current host verified copies are installed under `~/.local/opt/fluxget/media-tools` for the preview, not installed system-wide or shipped in v1 installers. Go modules/dependencies remain unchanged. Production dependency installation/notices remain a later release gate.
 
 ### User experience and format choices
 
-1. Choose **Add YouTube download**, paste a link and analyze it without downloading the media. Show title, duration and available outputs; bounded metadata work must be cancelable.
+1. Open **YouTube**, paste a link and analyze it without downloading the media. Show title, duration and available outputs; bounded metadata work must be cancelable.
 2. Choose **Video** or **Audio only**, an output format, quality and destination. Default to an available MP4-compatible video/audio combination up to 1080p; if unavailable, offer the best supported alternative explicitly. Never invent a quality or silently upscale.
 3. Offer MP4, WebM and MKV only where the selected source codecs and container are compatible. Show resolution, frame rate, codec, audio track/language and exact or estimated size when known. A container extension is not a quality setting; prefer merging/remuxing without re-encoding video.
 4. Offer M4A/AAC and Opus when available, plus MP3 conversion with an explicit bitrate choice. Explain that converting to MP3 takes extra processing and does not improve source quality. Broad video transcoding, subtitles and thumbnail embedding can follow later.
 5. For playlists, show a bounded, paginated preview with select-all/individual selection, original order and unavailable-entry status. Fetch detailed formats only for selected items. Start with 100 entries per page and a 1,000-item admission cap per batch; larger imports require another explicit batch rather than unbounded expansion.
 6. Apply a preferred format/maximum quality to selected videos, resolve it per item and preview exceptions. Let the user accept a lower available quality or skip the item; do not silently change video to audio-only. Show estimated disk requirements, or Unknown, before confirmation.
-7. Confirm **Download now** or **Download later**. Show individual videos in Downloads with an optional playlist group, per-video progress and a completed/failed/skipped summary. Successful items remain successful when another item fails; retry only failed or selected entries.
+7. Use one **Download** button after selecting output and destination; do not add a separate Review selection step. Show individual videos in Downloads with an optional playlist group, per-video progress and a completed/failed/skipped summary. Successful items remain successful when another item fails; retry only failed or selected entries.
 
-### Planned ownership, persistence and controls
+### Ownership, persistence and controls
 
 ```text
 Add YouTube link -> Go media adapter -> bounded metadata -> selection preview
@@ -351,7 +351,7 @@ Add YouTube link -> Go media adapter -> bounded metadata -> selection preview
     -> existing Downloads rows, speed, status and playlist summary
 ```
 
-- `media/` now provides the isolated subprocess adapter for metadata, explicit format selection, scratch transfers, structured progress, cancellation and ffprobe inspection. Add scheduler integration in a proposed `queue_media.go` and desktop intake later; no direct HTTP implementation or persistent job schema changed in stage 1.
+- `media/` now provides the isolated subprocess adapter for metadata, explicit format selection, scratch transfers, structured progress, cancellation and ffprobe inspection. Stage 3 adds scheduler integration in `queue_media.go`, durable recovery in `queue_media_state.go` and desktop submission; the original HTTP transfer path stays separate.
 - The existing queue owner remains the sole admission/persistence authority. Admit one selected video as one job, not an entire untracked playlist process. Persist backend type, original source URL/video ID, selected output policy, destination, tool compatibility information and playlist order/group. Deduplicate repeated submission using video ID plus output profile while allowing an explicit different-quality copy.
 - Introduce a backed-up, versioned queue migration before media jobs can be saved; retain old direct-download records and v4 checkpoints unchanged. Media sidecars live in a private job workspace and use a separate versioned recovery contract. Older clients must reject unsupported media schemas clearly. Restored unfinished jobs remain paused.
 - Use absolute tool paths and argument arrays, no shell command interpolation or user-provided extra flags. Isolate user tool configuration/plugins; disable implicit updates and unapproved remote component installation. Restrict intake to supported YouTube URLs, sanitize filenames and diagnostics, bound metadata/progress/log buffers, and retain TLS checks. Do not import browser cookies or expose signed stream URLs in logs.
@@ -367,14 +367,14 @@ Add YouTube link -> Go media adapter -> bounded metadata -> selection preview
 | Stage | Task | Status | Required result / verification |
 |---|---|---|---|
 | 1 | Dependency and backend spike | 🔄 Current | Adapter, artifact lock, tools helper and probe command implemented; real Linux merge/audio/cap and fixture contracts pass; public metadata passed through v2ray; Windows native CI and public media transfer remain open |
-| 2 | Single-video selection UI | ⬜ Todo | Analyze/cancel, Video/Audio choices, available quality/container, destination and clear missing-tool/unavailable-format errors; no transfer before confirmation |
-| 3 | Persistent media jobs | ⬜ Todo | Backend dispatch, queue migration/rollback boundary, progress phases, speed ceilings, process-tree shutdown, owned output publication and restart-paused recovery |
+| 2 | Single-video selection UI | ✅ Done | Cancelable analysis, explicit proxy, compatible Video/Audio choices, quality/MP3 bitrate and destination; one Download button submits to the queue |
+| 3 | Persistent media jobs | ✅ Done | Linux preview installed: schema-5 queue, progress phases, live speed ceilings, helper ownership, verified publication, pause/resume and restart-paused recovery; broader acceptance remains in stages 1/5 |
 | 4 | Playlist selection and admission | ⬜ Todo | Bounded enumeration, chosen entries, per-item format resolution, stable order, deduplication, partial success and retry-failed; no duplicate work after crash |
 | 5 | Recovery and resource acceptance | ⬜ Todo | Pause/reopen, expired links, interrupted merge/conversion, full disk, missing tools, source changes, mixed direct/media limits and CPU/memory/storage impact |
 | 6 | Optional browser entry point | ⬜ Todo | Explicit send action for video/playlist pages, preview and consent; ordinary playback/navigation and current direct-link capture remain correct |
 | 7 | Native packaging and release | ⬜ Todo | .deb/.exe include required tool setup, notices, checksums and diagnostics; clean-machine install/repair/uninstall and media acceptance pass; choose/bump version only then |
 
-**Next acceptance step:** Run the native media CI matrix and a full transfer of an explicitly selected public YouTube sample before closing stage 1. Public metadata extraction has already passed through the local proxy. Do not replace the existing HTTP engine or claim the UI/playlist feature is ready.
+**Next acceptance step:** Run the native media CI matrix and a full public video/merge transfer before closing stage 1. Public metadata and a full public audio-to-MP3 transfer have passed through the local proxy. Persistent single-video downloads are available as a development preview; playlists are not ready. Do not replace the existing HTTP engine.
 
 ### Stage 1 implementation and evidence
 
@@ -400,6 +400,35 @@ FLUXGET_MEDIA_TOOLS="$PWD/dist/media-tools/tools.json" go test -race -v ./media
 ```
 
 For an explicitly selected public sample, use the command's `-mode analyze -url "<PUBLIC_YOUTUBE_VIDEO_URL>"`; `-mode video` or `-mode mp3` also needs `-directory "<ABSOLUTE_SCRATCH_PARENT>"` and optionally `-limit <BYTES_PER_SECOND>`. Add `-proxy "<PROXY_ADDRESS>"` to analyze/download through a configured local proxy. `FLUXGET_MEDIA_TEST_URL` enables the opt-in public metadata test, with optional `FLUXGET_MEDIA_PROXY` for its route. Ordinary CI uses only generated local media and never needs YouTube access. The pinned development FFmpeg artifact is a GPL build; it is not bundled into production installers by this change, and its redistribution/source obligations must be resolved before stage 7.
+
+### Stage 2 selection preview
+
+- The operator approved building this UI while stage-1 native Windows and full public-transfer checks remain pending. Those acceptance gates are still open; passing UI fixture tests does not close them.
+- The desktop now has Downloads, YouTube and Settings tabs. YouTube performs bounded metadata analysis through the selected Direct/proxy route, with cancel and shutdown waiting for owned subprocess cleanup. Editing the source, tools manifest or proxy choice invalidates stale selections; canceled/late results are discarded.
+- Shared media selection validation supplies only compatible output formats. The default is available MP4/H.264/AAC up to 1080p; a missing MP4 option is explained explicitly. Available resolution/FPS/codecs and audio language/bitrate are shown. Muxed video keeps its included audio; audio-only M4A/Opus and MP3 with 128/192/256/320 kbps are offered only when supported.
+- Destination review uses a sanitized editable filename and the chosen extension, rejects unsafe/reserved names and existing files, and distinguishes source-transfer estimates from final file size. Analyze creates no media files or queue requests and saves no draft after closing. The stage-3 Download button validates the selection, submits one persistent job and opens Downloads; there is no separate review step.
+- Development tool discovery uses an explicit FLUXGET_MEDIA_TOOLS manifest, an adjacent media-tools/tools.json, or the user's selected manifest under the collapsed Media tools section. No PATH search, automatic install, remote update or production packaging change was introduced.
+- Headless desktop tests cover tab integration, format/mode/track changes, proxy snapshots, single-video handling for watch URLs containing a playlist, playlist-only rejection, missing tools, redacted errors, cancel/close reaping, safe destinations, single-submit Download and processing progress. The native CI matrix includes these tests; local Windows verification remains cross-compilation only.
+
+
+### Stage 3 persistent media preview — implemented 2026-11-12
+
+- A single Download button submits a minimized, validated video/format selection with a captured proxy route to the existing queue owner. Media phases and aggregate component counters appear in Downloads; merging/conversion does not show a fabricated transfer speed or HTTP range parts.
+- Queue schema 5 preserves older input schemas and creates `queue.json.before-media` before first media admission. Older v1 binaries cannot read schema 5; rollback must use a compatible queue backup rather than silently discard media jobs.
+- Admit at most one media job at a time, counting it against the normal active-file ceiling. Media requests are outside Go HTTP request leases. With an overall speed cap, serialize HTTP and media transfers; live changes cancel/reap/save and restart media under the new effective ceiling. Automatic media connection adaptation is not implemented.
+- A queue-owned helper watches stdin EOF, owns the job lock and reaps its tool tree on pause, queue death or limit changes. Clean recovery validates saved local file identity/hash, exact tool versions and fresh selected representation metadata before yt-dlp continuation. Unclean or changed scratch requires an explicit Restart; suspect files are preserved for inspection. This does not guarantee byte-exact resume after every upstream representation change.
+- Recovery records use a separate `.media` sidecar and opaque owned workspace. ffprobe checks output streams, selected quality and duration before durable no-overwrite publication. Interrupted publication can recognize its own final file; unrelated files, symlinks and foreign hardlinks are refused.
+- Verification: full root race suite with real tools passed (engine 134.539 seconds; media 21.262 seconds); full desktop headless race passed (45.140 seconds). Actual queue-driven generated MP4 merge and MP3 conversion passed. Regressions cover pause/resume, cap changes, mixed-backend draining, SIGKILL/EOF cleanup, migration, unsafe scratch and destination conflicts. Root/desktop vet and Windows test cross-builds passed; native Windows runtime and full public YouTube transfer remain open.
+- Installed paired engine/GUI and verified media tools at `~/.local/opt/fluxget`; running GUI hash matches the new build. Existing idle queue and settings were retained. Preview backup: `~/.local/state/fluxget/backups/20261112-110219-youtube-download-preview`. No release/package/version change or commit/push.
+- Stage 5 still needs broader power-loss/expired-link/full-disk/resource acceptance. Backend download runs currently have a 30-minute timeout; long-video behavior and paused progress display after abrupt queue death need further acceptance. Playlists remain stage 4.
+
+
+### Public media routing investigation — 2026-11-12
+
+- The failed job used the same loopback proxy host/port as the system's manual HTTP/HTTPS/SOCKS proxy configuration. Actual Chrome/Firefox playback requests were unavailable to the UI tools, so browser routing/session equivalence was not proven.
+- Fresh requests reached YouTube via both SOCKS and HTTP CONNECT. The same selected audio URL returned HTTP 206 and 16,384 bytes with curl through either protocol; yt-dlp downloaded all 4,629,623 source bytes in 4.38 seconds. A different audio format returned a redirect; this was not counted as successful transfer.
+- The actual Go media backend then analyzed the original video, confirmed the saved selection still matched, downloaded selected audio format 251 and converted to MP3 at 320 kbps through the unchanged saved proxy. ffprobe validation passed: 267.006271 seconds, one MP3 audio stream, 10,682,925 output bytes, 14.15 seconds for download/conversion. Temporary diagnostic media and signed metadata were removed; the user's failed queue job and proxy settings were unchanged.
+- The earlier 15/45-second timeouts are no longer reproducing; no definitive underlying cause was established. Both previously failing and currently selected CDN hosts now respond. Do not label the proxy generally broken or claim a routing fix. Public video/merge, native Windows and broader recovery acceptance remain open.
 
 ### Packaging, maintenance and release acceptance
 

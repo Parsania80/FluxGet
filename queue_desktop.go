@@ -81,6 +81,11 @@ func queueDestinationAvailable(q queueData, destination string, except int) erro
 			return err
 		}
 	}
+	if record, err := mediaRecordPath(destination); err != nil {
+		return err
+	} else if err := requireAbsent(record); err != nil {
+		return err
+	}
 	cp, err := checkpointLocation(destination)
 	if err != nil {
 		return err
@@ -89,6 +94,19 @@ func queueDestinationAvailable(q queueData, destination string, except int) erro
 }
 
 func desktopAdd(q *queueData, input queueJob, adopt bool) (int, error) {
+	if input.Media != nil {
+		if adopt {
+			return 0, errors.New("media downloads must be restored by their queue")
+		}
+		if err := validateMediaQueueJob(input); err != nil {
+			return 0, err
+		}
+		for _, old := range q.Jobs {
+			if old.Media != nil && old.Media.Video.ID == input.Media.Video.ID && old.Media.Selection == input.Media.Selection {
+				return 0, errors.New("this video and format are already in Downloads; resume or retry that entry")
+			}
+		}
+	}
 	if input.Proxy != nil {
 		config, err := input.Proxy.Normalize()
 		if err != nil {
@@ -161,7 +179,10 @@ func desktopAdd(q *queueData, input queueJob, adopt bool) (int, error) {
 	q.NextID++
 	q.Jobs = append(q.Jobs, input)
 	if input.Proxy != nil {
-		q.Version = 4
+		q.Version = max(q.Version, 4)
+	}
+	if input.Media != nil {
+		q.Version = 5
 	}
 	return input.ID, nil
 }

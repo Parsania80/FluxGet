@@ -19,6 +19,22 @@ func cleanupQueueJob(q *queueData, index int, queuePath, action string) (bool, e
 
 func cleanupQueueJobWithHook(q *queueData, index int, queuePath, action string, hook func(string)) (bool, error) {
 	j := &q.Jobs[index]
+	if j.Media != nil {
+		if err := requireAbsent(j.Destination); err != nil {
+			return false, err
+		}
+		if err := cleanupMediaRecord(*j, action == "restart"); err != nil {
+			return false, err
+		}
+		j.State, j.Progress, j.Message, j.SavedProgress = "canceled", "", "", nil
+		if action == "restart" {
+			j.State = "queued"
+		}
+		if err := saveQueue(queuePath, *q); err != nil {
+			return true, err
+		}
+		return false, nil
+	}
 	if j.State == "resetting" && (j.Cleanup == nil || j.Cleanup.Action != action) {
 		return false, errors.New("repeat the original cleanup command")
 	}

@@ -25,6 +25,8 @@ type queueProgress struct {
 	source *queueProgressWriter
 }
 type queueProgressWriter struct {
+	media    atomic.Pointer[mediaUpdate]
+	mediaAt  atomic.Int64
 	id       int
 	updates  chan<- queueProgress
 	segments atomic.Pointer[segmentSnapshot]
@@ -107,6 +109,7 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 	scanLines, scanDone := lines, inputDone
 	go func() {
 		s := bufio.NewScanner(input)
+		s.Buffer(make([]byte, 4096), 1<<20)
 		for s.Scan() {
 			select {
 			case scanLines <- s.Text():
@@ -143,6 +146,7 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 	}
 	active := make(map[int]context.CancelFunc)
 	workerControls := make(map[int]*workerControl)
+	mediaControls := make(map[int]*mediaControl)
 	requested := make(map[int]string)
 	seenTimeouts := make(map[int]int64)
 	started, stopping, desktopInitialized := false, false, false
@@ -215,6 +219,23 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 	}
 	for {
 		management, _ := budget.snapshot()
+		_, mediaOverall, mediaLimitErr := mediaLimits(ctx, 0)
+		activeMedia := 0
+		for id, control := range mediaControls {
+			if _, ok := active[id]; ok {
+				activeMedia++
+				control.others.Store(int64(len(active) - 1))
+			}
+		}
+		if activeMedia > 0 && (mediaOverall > 0 || mediaLimitErr != nil) {
+			for id, cancel := range active {
+				if mediaControls[id] == nil && requested[id] == "" {
+					requested[id] = "queued"
+					generation++
+					cancel()
+				}
+			}
+		}
 		fileMaximum := maxActive
 		if management.Policy.Mode == "automatic" {
 			fileMaximum = automatic.admissionMaximum(maxActive, automaticJobs(), budget, clock())
@@ -228,6 +249,13 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 					break
 				}
 				if q.Jobs[i].State != "queued" || (management.Policy.Mode == "automatic" && !budget.canStart(queueOrigin(q.Jobs[i].URL), clock())) {
+					continue
+				}
+				isMedia := q.Jobs[i].Media != nil
+				if isMedia && (activeMedia > 0 || (mediaOverall > 0 || mediaLimitErr != nil) && len(active) > 0) {
+					continue
+				}
+				if !isMedia && activeMedia > 0 && (mediaOverall > 0 || mediaLimitErr != nil) {
 					continue
 				}
 				q.Jobs[i].State = "running"
@@ -252,8 +280,16 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 					target = 1
 				}
 				control := newWorkerControl(connections, target)
-				workerControls[job.ID] = control
-				workerCtx = context.WithValue(workerCtx, workerControlKey{}, control)
+				if !isMedia {
+					workerControls[job.ID] = control
+					workerCtx = context.WithValue(workerCtx, workerControlKey{}, control)
+				} else {
+					mediaControl := &mediaControl{}
+					mediaControl.others.Store(int64(len(active)))
+					mediaControls[job.ID] = mediaControl
+					workerCtx = context.WithValue(workerCtx, mediaControlKey{}, mediaControl)
+					activeMedia++
+				}
 				active[job.ID] = cancel
 				writer := &queueProgressWriter{id: job.ID, updates: updates}
 				progressWriters[job.ID] = writer
@@ -377,6 +413,7 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 			active[result.id]()
 			delete(active, result.id)
 			delete(workerControls, result.id)
+			delete(mediaControls, result.id)
 			delete(seenTimeouts, result.id)
 			delete(progressWriters, result.id)
 			delete(speeds, result.id)
@@ -434,6 +471,11 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 				shutdown(err)
 				continue
 			}
+			if state == "completed" && q.Jobs[i].Media != nil {
+				if err := cleanupMediaRecord(q.Jobs[i], false); err != nil {
+					fmt.Fprintln(output, "Completed media scratch kept for inspection; output is complete.")
+				}
+			}
 			if result.err != nil && state == "failed" {
 				message := result.err.Error()
 				if q.Jobs[i].IntakeID != "" {
@@ -453,6 +495,9 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 				desktopRevision++
 				response := desktopResponse{ID: req.ID, Revision: desktopRevision}
 				changed := false
+				if requestErr == nil && req.Job.Media != nil && q.Version < 5 && req.Operation == "add" {
+					requestErr = backupQueueNamed(path, ".before-media")
+				}
 				if requestErr == nil && req.Job.Proxy != nil && req.Job.Proxy.Enabled && q.Version < 4 && (req.Operation == "add" || req.Operation == "browser-prepare" || req.Operation == "adopt") {
 					requestErr = backupQueueNamed(path, ".before-proxy")
 				}
@@ -496,6 +541,18 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 						}
 						if requested[j.ID] != "" {
 							requestErr = errors.New("download is still stopping; try again shortly")
+							break
+						}
+						if req.Action == "restart" && j.Media != nil {
+							if j.State != "paused" && j.State != "failed" && j.State != "canceled" {
+								requestErr = errors.New("pause the media download before restarting")
+								break
+							}
+							fatal, e := cleanupQueueJob(&q, i, path, "restart")
+							requestErr, changed = e, e == nil
+							if fatal {
+								shutdown(e)
+							}
 							break
 						}
 						if req.Action == "remove" || req.Action == "delete" || req.Action == "discard" {
@@ -615,6 +672,10 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 						}
 					case "retarget":
 						i := find(req.Job.ID)
+						if i >= 0 && q.Jobs[i].Media != nil {
+							requestErr = errors.New("keep this media job and add a separate selection with a new filename")
+							break
+						}
 						if i < 0 || q.Jobs[i].State == "running" || q.Jobs[i].State == "queued" || q.Jobs[i].State == "resetting" {
 							requestErr = errors.New("pause the download before choosing a new filename")
 						} else if requestErr = queueDestinationAvailable(q, req.Job.Destination, req.Job.ID); requestErr == nil {
@@ -660,6 +721,32 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 				response.Management = &management
 				for i := range response.Jobs {
 					entry := &response.Jobs[i]
+					if entry.Media != nil {
+						entry.Mode = "media"
+						if writer := progressWriters[entry.ID]; writer != nil {
+							if update := writer.media.Load(); update != nil {
+								entry.MediaPhase, entry.Activity = update.Phase, mediaPhase(update.Phase)
+								if update.Phase == "download" {
+									rate := update.Speed
+									if time.Since(time.Unix(0, writer.mediaAt.Load())) >= 2500*time.Millisecond {
+										rate = 0
+									}
+									entry.Speed = &rate
+								} else {
+									entry.Speed = nil
+								}
+								if update.Total > 0 {
+									entry.Progress = fmt.Sprintf("Downloaded %d/%d bytes", update.Downloaded, update.Total)
+								} else if update.Downloaded > 0 {
+									entry.Progress = fmt.Sprintf("Downloaded %d bytes", update.Downloaded)
+								}
+							}
+						}
+						if entry.State == "running" && entry.MediaPhase == "" {
+							entry.MediaPhase, entry.Activity = "checking", mediaPhase("checking")
+						}
+						continue
+					}
 					entry.BrowserPending = pendingBrowserJob(q, entry.queueJob)
 					if w := resources.storage[entry.ID]; w != nil {
 						view := w.view
@@ -899,6 +986,9 @@ func runQueueDownload(ctx context.Context, j queueJob, connections int) error {
 }
 
 func runQueueDownloadWithProgress(ctx context.Context, j queueJob, connections int, progress io.Writer) error {
+	if j.Media != nil {
+		return runQueueMedia(ctx, j, progress)
+	}
 	if budget, ok := ctx.Value(bufferBudgetKey{}).(*bufferBudget); ok {
 		buffers, err := budget.acquire(ctx)
 		if err != nil {

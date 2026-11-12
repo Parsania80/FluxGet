@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Parsania80/FluxGet/internal/platformfile"
+	"github.com/Parsania80/FluxGet/media"
 	"github.com/Parsania80/FluxGet/networkproxy"
 	"io"
 	"net/url"
@@ -22,6 +23,7 @@ type cleanupIntent struct {
 }
 
 type queueJob struct {
+	Media          *media.Job           `json:"media,omitempty"`
 	Proxy          *networkproxy.Config `json:"proxy,omitempty"`
 	IntakeID       string               `json:"browser_intake_id,omitempty"`
 	ID             int                  `json:"id"`
@@ -83,7 +85,7 @@ func loadQueue(path string) (queueData, error) {
 	if err = dec.Decode(&q); err != nil {
 		return q, err
 	}
-	if dec.Decode(new(any)) != io.EOF || (q.Version != 1 && q.Version != 2 && q.Version != 3 && q.Version != 4) || q.NextID < 1 {
+	if dec.Decode(new(any)) != io.EOF || q.Version < 1 || q.Version > 5 || q.NextID < 1 {
 		return q, errors.New("invalid queue metadata")
 	}
 	ids := make(map[int]bool)
@@ -97,6 +99,9 @@ func loadQueue(path string) (queueData, error) {
 	}
 	destinations := make(map[string]bool)
 	for _, j := range q.Jobs {
+		if j.Media != nil && (q.Version < 5 || validateMediaQueueJob(j) != nil || j.Cleanup != nil) {
+			return q, errors.New("invalid media queue job")
+		}
 		if j.Proxy != nil {
 			if _, err := j.Proxy.Normalize(); err != nil || q.Version < 4 {
 				return q, errors.New("invalid queue proxy settings")
@@ -156,6 +161,12 @@ func saveQueue(path string, q queueData) error {
 		q.Version = max(q.Version, 3)
 	}
 	for _, job := range q.Jobs {
+		if job.Media != nil {
+			if err := validateMediaQueueJob(job); err != nil {
+				return err
+			}
+			q.Version = max(q.Version, 5)
+		}
 		if job.Proxy != nil {
 			if _, err := job.Proxy.Normalize(); err != nil {
 				return err

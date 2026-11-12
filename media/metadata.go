@@ -112,10 +112,10 @@ func parseVideo(data []byte) (Video, error) {
 }
 
 type Selection struct {
-	VideoFormat string // Optional for audio-only; IDs must occur in Video.Formats.
-	AudioFormat string
-	Container   string // mp4, webm, mkv, m4a, opus, or mp3.
-	MP3Kbps     int
+	VideoFormat string `json:"video_format,omitempty"` // Optional for audio-only; IDs must occur in Video.Formats.
+	AudioFormat string `json:"audio_format,omitempty"`
+	Container   string `json:"container"` // mp4, webm, mkv, m4a, opus, or mp3.
+	MP3Kbps     int    `json:"mp3_kbps,omitempty"`
 }
 
 func (s Selection) validate(v Video) (string, error) {
