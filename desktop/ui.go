@@ -6,6 +6,7 @@ import (
 	"github.com/Parsania80/FluxGet/browserbridge"
 	"github.com/Parsania80/FluxGet/internal/buildinfo"
 	"github.com/Parsania80/FluxGet/internal/platformcmd"
+	"github.com/Parsania80/FluxGet/networkproxy"
 	"image/color"
 	"net/url"
 	"os"
@@ -150,7 +151,7 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 		name.Truncation = fyne.TextTruncateEllipsis
 		detail := widget.NewLabel("Status")
 		detail.Wrapping = fyne.TextWrapWord
-		controls := container.NewHBox(widget.NewLabelWithStyle("Speed: —", fyne.TextAlignTrailing, fyne.TextStyle{Bold: true}), widget.NewButton("Limit: default", nil), widget.NewButton("Remove limit", nil), widget.NewCheck("Select", nil))
+		controls := container.NewHBox(widget.NewLabelWithStyle("Speed: —", fyne.TextAlignTrailing, fyne.TextStyle{Bold: true}), widget.NewButton("Limit: default", nil), widget.NewButton("Remove limit", nil), widget.NewCheck("Select", nil), widget.NewButton("Direct", nil))
 		return container.NewVBox(container.NewBorder(nil, nil, nil, controls, name), detail, progressLine(), newSegmentPanel())
 	}, func(id widget.ListItemID, object fyne.CanvasObject) {
 		rows := v.rows()
@@ -205,6 +206,11 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 		} else {
 			button.Enable()
 			remove.Enable()
+		}
+		routeButton := controls.Objects[4].(*widget.Button)
+		bindProxyButton(routeButton, j, func() { v.editProxy(row.Key) })
+		if !v.ready || v.busy || v.closing || j.ID == 0 {
+			routeButton.Disable()
 		}
 		details := j.displayState() + "  ·  " + downloadDetails(j, v.settings.DisplayUnit)
 		if j.Activity != "" {
@@ -437,7 +443,7 @@ func (v *downloadsView) apply(entries []queueEntry) {
 	for _, entry := range entries {
 		if entry.State == "failed" && entry.Conflict != "" && v.prompted[entry.ID] != entry.Conflict && !v.closing {
 			v.prompted[entry.ID] = entry.Conflict
-			v.duplicate(downloadDraft{URL: entry.URL, Destination: entry.Conflict, TargetID: entry.ID}, entry.Conflict)
+			v.duplicate(downloadDraft{Proxy: entry.Proxy, URL: entry.URL, Destination: entry.Conflict, TargetID: entry.ID}, entry.Conflict)
 			break
 		}
 	}
@@ -700,6 +706,7 @@ func (v *downloadsView) finishClose() {
 }
 
 type downloadDraft struct {
+	Proxy                *networkproxy.Config
 	URL, Destination     string
 	AutomaticName, Later bool
 	TargetID             int
@@ -714,6 +721,10 @@ func (v *downloadsView) addDialog() {
 	folder.SetPlaceHolder("Your Downloads folder")
 	name := widget.NewEntry()
 	name.SetPlaceHolder("Use the server’s filename")
+	useProxy := widget.NewCheck("Download with proxy", nil)
+	useProxy.SetChecked(v.settings.Proxy.Enabled)
+	proxyNote := widget.NewLabel(proxyDefaultDescription(v.settings.Proxy))
+	proxyNote.Wrapping = fyne.TextWrapWord
 	note := widget.NewLabel("Download now starts when a slot is free. Download later stays paused until you resume it.")
 	note.Wrapping = fyne.TextWrapWord
 	browse := widget.NewButton("Browse…", func() {
@@ -733,6 +744,11 @@ func (v *downloadsView) addDialog() {
 			dialog.ShowInformation("Download link required", "Enter a public HTTP or HTTPS download link without credentials.", v.window)
 			return
 		}
+		route, proxyErr := proxyForDownload(v.settings.Proxy, useProxy.Checked)
+		if proxyErr != nil {
+			dialog.ShowError(proxyErr, v.window)
+			return
+		}
 		prompt.Hide()
 		var destination string
 		v.work(func(q *queueClient) (desktopResponse, error) {
@@ -747,7 +763,7 @@ func (v *downloadsView) addDialog() {
 			destination = path
 			return callDesktop(q, desktopRequest{Operation: "snapshot"})
 		}, func(response desktopResponse) {
-			draft := downloadDraft{URL: raw, Destination: destination, AutomaticName: filename == "", Later: later}
+			draft := downloadDraft{Proxy: route, URL: raw, Destination: destination, AutomaticName: filename == "", Later: later}
 			if _, err := os.Lstat(draft.Destination); err == nil {
 				v.duplicate(draft, draft.Destination)
 				return
@@ -764,9 +780,9 @@ func (v *downloadsView) addDialog() {
 	now := widget.NewButtonWithIcon("Download now", theme.DownloadIcon(), func() { submit(false) })
 	now.Importance = widget.HighImportance
 	later := widget.NewButton("Download later", func() { submit(true) })
-	form := container.NewVBox(note, widget.NewForm(widget.NewFormItem("Download link", link), widget.NewFormItem("Folder", container.NewBorder(nil, nil, nil, browse, folder)), widget.NewFormItem("Filename", name)), container.NewHBox(now, later))
+	form := container.NewVBox(note, useProxy, proxyNote, widget.NewForm(widget.NewFormItem("Download link", link), widget.NewFormItem("Folder", container.NewBorder(nil, nil, nil, browse, folder)), widget.NewFormItem("Filename", name)), container.NewHBox(now, later))
 	prompt = dialog.NewCustom("Add download", "Cancel", form, v.window)
-	prompt.Resize(fyne.NewSize(620, 360))
+	prompt.Resize(fyne.NewSize(620, 450))
 	prompt.Show()
 	v.window.Canvas().Focus(link)
 }
@@ -775,7 +791,7 @@ func (v *downloadsView) enqueue(draft downloadDraft) {
 	if draft.Later || draft.Replace != nil {
 		state = "paused"
 	}
-	entry := queueEntry{ID: draft.TargetID, URL: draft.URL, Destination: draft.Destination, AutomaticName: draft.AutomaticName, State: state}
+	entry := queueEntry{Proxy: draft.Proxy, ID: draft.TargetID, URL: draft.URL, Destination: draft.Destination, AutomaticName: draft.AutomaticName, State: state}
 	operation := "add"
 	if draft.TargetID > 0 {
 		operation = "retarget"

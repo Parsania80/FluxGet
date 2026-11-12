@@ -184,6 +184,11 @@ func (b *browserIntegration) handle(ctx context.Context, r browserbridge.Request
 					respond(browserbridge.Failure("Choose a plain filename"))
 					return
 				}
+				route, routeErr := proxyForDownload(v.settings.Proxy, v.settings.Proxy.Enabled)
+				if routeErr != nil {
+					respond(browserbridge.Failure("Configure the proxy address in FluxGet Settings"))
+					return
+				}
 				v.workResult(func(q *queueClient) (desktopResponse, error) {
 					output, err := platformcmd.Command(v.executable, append([]string{"-suggest-output"}, downloadArgs(r.URL, folder, filename)...)...).Output()
 					if err != nil {
@@ -195,7 +200,7 @@ func (b *browserIntegration) handle(ctx context.Context, r browserbridge.Request
 					}
 					// Identical IDs must always choose the identical destination. A conflict
 					// leaves the browser item intact; there is no implicit overwrite.
-					return q.request(ctx, desktopRequest{Operation: "browser-prepare", Action: r.Kind, BrowserLater: later, Job: queueEntry{URL: r.URL, Destination: dest, State: "paused", IntakeID: r.Key()}})
+					return q.request(ctx, desktopRequest{Operation: "browser-prepare", Action: r.Kind, BrowserLater: later, Job: queueEntry{Proxy: route, URL: r.URL, Destination: dest, State: "paused", IntakeID: r.Key()}})
 				}, func(response desktopResponse) {
 					respond(browserbridge.Response{Version: browserbridge.Version, OK: true, JobID: response.JobID, Stage: response.BrowserStage, Filename: filename})
 				}, func(err error) { respond(browserbridge.Failure(err.Error())) })

@@ -2,10 +2,12 @@ package main
 
 import (
 	"fmt"
+	"github.com/Parsania80/FluxGet/networkproxy"
 	"strings"
 )
 
 type queueEntry struct {
+	Proxy           *networkproxy.Config `json:"proxy,omitempty"`
 	BrowserPending  bool                 `json:"browser_pending,omitempty"`
 	IntakeID        string               `json:"browser_intake_id,omitempty"`
 	AutomaticReason string               `json:"automatic_reason,omitempty"`

@@ -4,7 +4,9 @@
 
 FluxGet is a download manager written in Go. It helps you manage several downloads, control their speed, and continue saved downloads after an interruption when the server allows it.
 
-**Version 1.0.0 is being prepared for Linux and Windows (64-bit Intel/AMD).** Publishing waits for checks on both operating systems; a failed check keeps the release unpublished while fixes are verified. Release packages are built on native Linux and Windows runners only when a version tag such as `v1.0.0` is pushed. Branch pushes run checks without publishing packages. Windows browser capture and other Linux distributions still need hands-on testing. macOS is not included.
+**[Version 1.0.0 is available for Linux and Windows (64-bit Intel/AMD).](https://github.com/Parsania80/FluxGet/releases/tag/v1.0.0)** Native checks and installer verification passed on both operating systems. Release packages are built only when a version tag such as `v1.0.0` is pushed. Branch pushes run checks without publishing packages. Windows browser capture and other Linux distributions still need hands-on testing. macOS is not included.
+
+**In development for the next version:** YouTube video and playlist downloads with quality and format choices. The media backend spike is implemented, but this feature is not available in the app yet. Public video information was tested through a proxy; full public video downloads and Windows media checks are still pending. See the [YouTube roadmap](project.md#youtube-videos-and-playlists--next-release-plan).
 
 ## What you can do
 
@@ -56,6 +58,16 @@ Use **Settings** to change the download folder, speed limits, or display units. 
 
 Removing an item from the list keeps its files. Deleting files is a separate action that requires confirmation.
 
+## Download through a proxy
+
+Available in development builds; not included in v1.0.0.
+
+In **Settings → Proxy**, enter the listening address from v2ray or another proxy app, such as `socks5://127.0.0.1:10808` or `http://127.0.0.1:10809`. Use your app's actual port and keep it running. HTTP, HTTPS and SOCKS5 addresses without a username/password are supported; subscription, vmess and vless links are not proxy addresses.
+
+Choose **Use proxy by default for new downloads** and click **Save settings**, or leave the default off and check **Download with proxy** when adding just one file. Each download has a **Proxy** or **Direct** button. Pause it before changing that choice, apply, then resume. Turning the option off uses Direct; changing the default does not reroute existing downloads.
+
+A failed proxy reports an error and never falls back to Direct automatically. SOCKS5 sends destination names to the proxy for DNS resolution. Direct ignores proxy environment variables and uses the operating system's normal network route. The YouTube development probe also accepts `-proxy`; its app UI is still pending.
+
 ## Browser downloads
 
 Browser setup currently uses a development extension. The recommended release setup is a normal FluxGet installer that configures the local bridge and guides you through connecting your browser; end users should not need Developer mode or folder selection. The v1 installers install the app and register Chrome/Firefox hosts; store distribution and the browser connection wizard are still pending.
@@ -92,11 +104,11 @@ Resume uses the same output path and requires a valid saved checkpoint. The stan
 - Resume depends on the saved data and server response; some downloads need a fresh start.
 - New downloads refuse existing output files. Incomplete data is kept after failures; final publication requires filesystem hard-link support.
 - Download metadata saves complete source URLs, including CDN query parameters. These links may grant access or expire; keep metadata private. Diagnostic messages hide URLs. Expired links may require a fresh download link.
-- Power-loss recovery is not guaranteed. Full release and interactive desktop acceptance are still in progress.
+- Power-loss recovery is not guaranteed. Broader interactive desktop and browser acceptance are still in progress.
 
 ## Development
 
-Release work uses branch `release/v1.0.0`; only version tags publish installers.
+New development uses `main`; the first release is preserved as tag `v1.0.0`. Only version tags publish installers.
 
 The engine and desktop are separate Go modules. Run checks in both:
 

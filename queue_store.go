@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Parsania80/FluxGet/internal/platformfile"
+	"github.com/Parsania80/FluxGet/networkproxy"
 	"io"
 	"net/url"
 	"os"
@@ -21,19 +22,20 @@ type cleanupIntent struct {
 }
 
 type queueJob struct {
-	IntakeID       string         `json:"browser_intake_id,omitempty"`
-	ID             int            `json:"id"`
-	URL            string         `json:"url"`
-	Destination    string         `json:"destination"`
-	State          string         `json:"state"`
-	ExpectedSHA256 string         `json:"expected_sha256,omitempty"`
-	Cleanup        *cleanupIntent `json:"cleanup,omitempty"`
-	AutomaticName  bool           `json:"automatic_name,omitempty"`
-	Message        string         `json:"message,omitempty"`
-	Progress       string         `json:"progress,omitempty"`
-	Conflict       string         `json:"conflict,omitempty"`
-	OutputPath     string         `json:"output_path,omitempty"`
-	SavedProgress  *float64       `json:"saved_progress,omitempty"`
+	Proxy          *networkproxy.Config `json:"proxy,omitempty"`
+	IntakeID       string               `json:"browser_intake_id,omitempty"`
+	ID             int                  `json:"id"`
+	URL            string               `json:"url"`
+	Destination    string               `json:"destination"`
+	State          string               `json:"state"`
+	ExpectedSHA256 string               `json:"expected_sha256,omitempty"`
+	Cleanup        *cleanupIntent       `json:"cleanup,omitempty"`
+	AutomaticName  bool                 `json:"automatic_name,omitempty"`
+	Message        string               `json:"message,omitempty"`
+	Progress       string               `json:"progress,omitempty"`
+	Conflict       string               `json:"conflict,omitempty"`
+	OutputPath     string               `json:"output_path,omitempty"`
+	SavedProgress  *float64             `json:"saved_progress,omitempty"`
 }
 type queueData struct {
 	BrowserReceipts map[string]browserReceipt `json:"browser_receipts,omitempty"`
@@ -81,11 +83,11 @@ func loadQueue(path string) (queueData, error) {
 	if err = dec.Decode(&q); err != nil {
 		return q, err
 	}
-	if dec.Decode(new(any)) != io.EOF || (q.Version != 1 && q.Version != 2 && q.Version != 3) || q.NextID < 1 {
+	if dec.Decode(new(any)) != io.EOF || (q.Version != 1 && q.Version != 2 && q.Version != 3 && q.Version != 4) || q.NextID < 1 {
 		return q, errors.New("invalid queue metadata")
 	}
 	ids := make(map[int]bool)
-	if len(q.BrowserReceipts) > 2048 || len(q.BrowserReceipts) > 0 && q.Version != 3 {
+	if len(q.BrowserReceipts) > 2048 || len(q.BrowserReceipts) > 0 && q.Version < 3 {
 		return q, errors.New("invalid browser handoff history")
 	}
 	for key, r := range q.BrowserReceipts {
@@ -95,9 +97,14 @@ func loadQueue(path string) (queueData, error) {
 	}
 	destinations := make(map[string]bool)
 	for _, j := range q.Jobs {
+		if j.Proxy != nil {
+			if _, err := j.Proxy.Normalize(); err != nil || q.Version < 4 {
+				return q, errors.New("invalid queue proxy settings")
+			}
+		}
 		if j.IntakeID != "" {
 			r, ok := q.BrowserReceipts[j.IntakeID]
-			if !ok || r.JobID != j.ID || q.Version != 3 || r.Stage == "pending" && j.State != "paused" {
+			if !ok || r.JobID != j.ID || q.Version < 3 || r.Stage == "pending" && j.State != "paused" {
 				return q, errors.New("invalid browser job")
 			}
 		}
@@ -146,7 +153,15 @@ func saveQueue(path string, q queueData) error {
 		q.Version = 2
 	}
 	if len(q.BrowserReceipts) > 0 {
-		q.Version = 3
+		q.Version = max(q.Version, 3)
+	}
+	for _, job := range q.Jobs {
+		if job.Proxy != nil {
+			if _, err := job.Proxy.Normalize(); err != nil {
+				return err
+			}
+			q.Version = max(q.Version, 4)
+		}
 	}
 	data, err := json.Marshal(q)
 	if err != nil {

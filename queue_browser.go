@@ -81,7 +81,7 @@ func browserQueueOperation(q *queueData, path string, req desktopRequest, now ti
 			q.BrowserReceipts = map[string]browserReceipt{}
 		}
 		q.BrowserReceipts[key] = browserReceipt{JobID: id, Stage: "pending", Kind: req.Action, Later: req.BrowserLater, Expires: now.Add(60 * time.Second).Unix()}
-		q.Version = 3
+		q.Version = max(q.Version, 3)
 		return id, true, nil
 	case "browser-status":
 		if exists && receipt.Stage == "pending" && index < 0 {

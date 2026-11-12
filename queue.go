@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Parsania80/FluxGet/browserbridge"
+	"github.com/Parsania80/FluxGet/networkproxy"
 )
 
 type queueProgress struct {
@@ -452,12 +453,21 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 				desktopRevision++
 				response := desktopResponse{ID: req.ID, Revision: desktopRevision}
 				changed := false
+				if requestErr == nil && req.Job.Proxy != nil && req.Job.Proxy.Enabled && q.Version < 4 && (req.Operation == "add" || req.Operation == "browser-prepare" || req.Operation == "adopt") {
+					requestErr = backupQueueNamed(path, ".before-proxy")
+				}
 				if requestErr == nil {
 					switch req.Operation {
 					case "browser-prepare", "browser-status", "browser-abort", "browser-activate":
 						response.JobID, changed, requestErr = browserQueueOperation(&q, path, req, clock())
 						if receipt, ok := q.BrowserReceipts[req.Job.IntakeID]; ok {
 							response.BrowserStage = receipt.Stage
+						}
+					case "proxy":
+						requestErr = setQueueProxy(&q, path, req.Job.ID, req.Job.Proxy)
+						changed = requestErr == nil
+						if changed {
+							generation++
 						}
 					case "workers":
 						i := find(req.Job.ID)
@@ -897,7 +907,14 @@ func runQueueDownloadWithProgress(ctx context.Context, j queueJob, connections i
 		defer buffers.release()
 		ctx = context.WithValue(ctx, transferBufferKey{}, buffers)
 	}
-	client := defaultDownloadClient()
+	route := networkproxy.Config{}
+	if j.Proxy != nil {
+		route = *j.Proxy
+	}
+	client, err := downloadClientWithProxy(route)
+	if err != nil {
+		return err
+	}
 	if budget, ok := ctx.Value(budgetContextKey{}).(*requestBudget); ok {
 		client.Transport = &requestTransport{base: client.Transport, budget: budget, job: j.ID, metrics: measurementsFrom(ctx)}
 	}

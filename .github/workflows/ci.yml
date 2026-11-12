@@ -9,6 +9,41 @@ permissions:
   contents: read
 
 jobs:
+  media:
+    name: Media and proxy checks ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.8'
+          cache: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Provision checksum-locked development tools
+        run: python packaging/setup_media_tools.py --directory "$RUNNER_TEMP/fluxget-media-tools"
+      - name: Native media contract and generated media acceptance
+        run: |
+          export FLUXGET_MEDIA_TOOLS="$RUNNER_TEMP/fluxget-media-tools/tools.json"
+          go test -race -count=1 -v ./media ./networkproxy
+          go test -race -count=1 -v -run '^(TestQueueProxy|TestProxyRoute|TestStandaloneCLIProxy|TestBrowserProxy)' .
+          go vet ./media ./networkproxy ./cmd/fluxget-media-spike
+          go run ./cmd/fluxget-media-spike -tools "$FLUXGET_MEDIA_TOOLS" -mode probe
+      - name: Native proxy desktop controls
+        working-directory: desktop
+        run: go test -race -tags ci -count=1 -v -run '^TestProxy' .
+
   linux:
     name: Linux amd64
     runs-on: ubuntu-24.04

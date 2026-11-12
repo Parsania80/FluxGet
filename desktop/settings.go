@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Parsania80/FluxGet/internal/platformfile"
+	"github.com/Parsania80/FluxGet/networkproxy"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 )
 
 type speedSettings struct {
+	Proxy          networkproxy.Config `json:"proxy,omitempty"`
 	hardwareNote   *widget.Label
 	Enabled        bool             `json:"enabled"`
 	Default        int64            `json:"default_kib"`
@@ -52,6 +54,10 @@ func loadSpeedSettings() (*speedSettings, error) {
 	if err := json.Unmarshal(data, s); err != nil {
 		return nil, err
 	}
+	s.Proxy, err = s.Proxy.Normalize()
+	if err != nil {
+		return nil, err
+	}
 	if s.ManagementMode == "" {
 		s.ManagementMode = "automatic"
 	}
@@ -82,6 +88,9 @@ func loadSpeedSettings() (*speedSettings, error) {
 }
 
 func (s *speedSettings) save() error {
+	if _, err := s.Proxy.Normalize(); err != nil {
+		return err
+	}
 	data, err := json.Marshal(s)
 	if err != nil {
 		return err
@@ -283,6 +292,7 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool)
 			}
 		}, w)
 	})
+	proxySection, proxyChoice := proxySettingsFields(s.Proxy)
 	result := widget.NewLabel("")
 	result.Wrapping = fyne.TextWrapWord
 	perDownload := widget.NewFormItem("Per download ("+inputUnit+"/s)", value)
@@ -294,6 +304,12 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool)
 			return
 		}
 		next := *s
+		var proxyErr error
+		next.Proxy, proxyErr = proxyChoice(s.Proxy)
+		if proxyErr != nil {
+			result.SetText(proxyErr.Error())
+			return
+		}
 		next.DisplayUnit = unit.Selected
 		next.ManagementMode = "automatic"
 		if mode.Selected == "Manual" {
@@ -351,7 +367,7 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool)
 			perDownload.Text = "Per download (" + inputUnit + "/s)"
 			allDownloads.Text = "All downloads (" + inputUnit + "/s)"
 			limits.Refresh()
-			result.SetText("Saved. Parallel worker limits, request budgets, and speed limits apply now. Extra workers save their progress before stopping; sequential transfers keep one worker.")
+			result.SetText("Saved. Proxy defaults apply to new downloads; existing downloads keep their route. Worker, request and speed limits apply now.")
 			if onSaved != nil {
 				onSaved()
 			}
@@ -377,6 +393,6 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool)
 		widget.NewAccordion(widget.NewAccordionItem("Customize download management", container.NewVBox(widget.NewForm(widget.NewFormItem("Mode", mode), widget.NewFormItem("Maximum simultaneous downloads", active), widget.NewFormItem("Maximum connections per download", connections), widget.NewFormItem("Maximum total connections", total), widget.NewFormItem("Maximum connections to one server", origin)), s.hardwareNote))),
 		widget.NewForm(widget.NewFormItem("Default folder", container.NewBorder(nil, nil, nil, browse, folder))),
 		widget.NewSeparator(), widget.NewLabelWithStyle("Speed limits", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), speedNote, enabled,
-		limits, save, result,
+		limits, widget.NewSeparator(), proxySection, save, result,
 	)))
 }

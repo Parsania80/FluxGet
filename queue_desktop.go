@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Parsania80/FluxGet/internal/platformfile"
+	"github.com/Parsania80/FluxGet/networkproxy"
 	"os"
 	"path/filepath"
 )
@@ -60,7 +61,7 @@ func backupQueueNamed(path, suffix string) error {
 	}
 	closeErr := f.Close()
 	if err != nil {
-		_ = os.Remove(path + ".before-unified")
+		_ = os.Remove(path + suffix)
 		return err
 	}
 	return closeErr
@@ -88,6 +89,16 @@ func queueDestinationAvailable(q queueData, destination string, except int) erro
 }
 
 func desktopAdd(q *queueData, input queueJob, adopt bool) (int, error) {
+	if input.Proxy != nil {
+		config, err := input.Proxy.Normalize()
+		if err != nil {
+			return 0, err
+		}
+		input.Proxy = &config
+		if !config.Enabled {
+			input.Proxy = nil
+		}
+	}
 	input.IntakeID = "" // Only the browser transaction can create a pending job.
 	if !filepath.IsAbs(input.Destination) || filepath.Clean(input.Destination) != input.Destination {
 		return 0, errors.New("choose an absolute output path")
@@ -149,6 +160,9 @@ func desktopAdd(q *queueData, input queueJob, adopt bool) (int, error) {
 	input.OutputPath = ""
 	q.NextID++
 	q.Jobs = append(q.Jobs, input)
+	if input.Proxy != nil {
+		q.Version = 4
+	}
 	return input.ID, nil
 }
 
@@ -158,4 +172,42 @@ func decodeDesktopRequest(data string) (desktopRequest, error) {
 		return req, errors.New("invalid desktop request")
 	}
 	return req, nil
+}
+
+func setQueueProxy(q *queueData, path string, id int, config *networkproxy.Config) error {
+	index := -1
+	for i := range q.Jobs {
+		if q.Jobs[i].ID == id {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return errors.New("download no longer exists")
+	}
+	j := q.Jobs[index]
+	if j.State != "paused" && j.State != "failed" && j.State != "canceled" {
+		return errors.New("pause the download before changing its proxy")
+	}
+	if pendingBrowserJob(*q, j) {
+		return errors.New("complete the browser handoff before changing its proxy")
+	}
+	var normalized *networkproxy.Config
+	if config != nil {
+		c, err := config.Normalize()
+		if err != nil {
+			return err
+		}
+		if c.Enabled {
+			normalized = &c
+		}
+	}
+	if normalized != nil && q.Version < 4 {
+		if err := backupQueueNamed(path, ".before-proxy"); err != nil {
+			return err
+		}
+		q.Version = 4
+	}
+	q.Jobs[index].Proxy = normalized
+	return nil
 }

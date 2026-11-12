@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Parsania80/FluxGet/networkproxy"
 	"io"
 	"net"
 	"net/http"
@@ -162,6 +163,7 @@ func (b *timeoutBody) Close() error { b.cancel(); return b.ReadCloser.Close() }
 
 func newDownloadClient(connect, tlsHandshake, header, idle time.Duration) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
+	_ = networkproxy.Configure(transport, networkproxy.Config{})
 	transport.DialContext = (&net.Dialer{Timeout: connect, KeepAlive: 30 * time.Second}).DialContext
 	transport.TLSHandshakeTimeout = tlsHandshake
 	transport.ResponseHeaderTimeout = header
@@ -169,4 +171,13 @@ func newDownloadClient(connect, tlsHandshake, header, idle time.Duration) *http.
 }
 func defaultDownloadClient() *http.Client {
 	return newDownloadClient(10*time.Second, 10*time.Second, 30*time.Second, 60*time.Second)
+}
+
+// Route is captured for a transfer before probes, retries or resume begin.
+func downloadClientWithProxy(config networkproxy.Config) (*http.Client, error) {
+	client := defaultDownloadClient()
+	if err := networkproxy.Configure(client.Transport.(*timeoutTransport).base, config); err != nil {
+		return nil, err
+	}
+	return client, nil
 }

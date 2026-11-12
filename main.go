@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/Parsania80/FluxGet/internal/buildinfo"
+	"github.com/Parsania80/FluxGet/networkproxy"
 	"io"
 	"net/http"
 	"os"
@@ -23,6 +24,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 	cancelOnClose := flags.Bool("cancel-on-stdin-close", false, "Cancel a desktop companion transfer when stdin closes")
 	version := flags.Bool("version", false, "Print FluxGet version")
+	proxyURL := flags.String("proxy", "", "Proxy URL for this transfer (HTTP, HTTPS or SOCKS5); empty selects Direct")
 	rawURL := flags.String("url", "", "Public HTTP or HTTPS file URL")
 	destination := flags.String("out", "", "Destination file (must not already exist)")
 	directory := flags.String("dir", "", "Download directory (default: Downloads)")
@@ -62,6 +64,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var limiter *speedLimiter
 	if *speedLimit > 0 {
 		limiter = &speedLimiter{gate: make(chan struct{}, 1), bytesPerSecond: *speedLimit * 1024}
+	}
+	proxy, proxyErr := (networkproxy.Config{Enabled: *proxyURL != "", URL: *proxyURL}).Normalize()
+	if proxyErr != nil {
+		fmt.Fprintln(stderr, proxyErr)
+		return 2
+	}
+	if *queue && proxy.Enabled {
+		fmt.Fprintln(stderr, "Choose a proxy per queue download in the desktop app; -proxy is for standalone transfers.")
+		return 2
 	}
 	if *queue {
 		if *list || *suggestOutput || *resume || *rawURL != "" || *destination != "" || *directory != "" || *name != "" || *checksum != "" || flags.NArg() != 0 || *maxActive < 1 || *maxActive > 64 {
@@ -131,7 +142,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if *cancelOnClose {
 		go func() { _, _ = io.Copy(io.Discard, os.Stdin); stop() }()
 	}
-	client := defaultDownloadClient()
+	client, proxyErr := downloadClientWithProxy(proxy)
+	if proxyErr != nil {
+		fmt.Fprintln(stderr, proxyErr)
+		return 2
+	}
 	limitClient(client, limiter)
 	if *liveFile != "" {
 		limitClient(client, &speedLimiter{gate: make(chan struct{}, 1), live: &liveSpeedSource{path: *liveFile, key: *liveKey}})

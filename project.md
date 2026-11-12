@@ -2,7 +2,7 @@
 
 FluxGet is a Go download manager inspired by IDM. The priorities are reliable transfers, understandable desktop controls, optional browser integration, and later experimental multi-interface downloading. It is also a learning and portfolio project for Go, concurrency, networking, persistence, and recovery.
 
-**Status — 2026-11-11:** Preparing operator-requested **v1.0.0** packages for Linux/amd64 and Windows/amd64. Windows adapters now implement file ownership/identity, NTFS ownership markers, parallel/checkpoint operation, desktop companion cancellation, and a private named-pipe browser bridge. Local Linux engine/desktop logic checks, native Chrome acceptance and Windows CLI/GUI/host cross-builds pass; native Windows runtime CI and browser acceptance are not yet claimed. Chrome Linux browser capture is implemented and tested; Firefox/Opera acceptance, Automatic stage 5, and multi-interface downloading remain open.
+**Status — 2026-11-12:** [v1.0.0 is published](https://github.com/Parsania80/FluxGet/releases/tag/v1.0.0) for Linux/amd64 and Windows/amd64; [release verification](https://github.com/Parsania80/FluxGet/actions/runs/43024303927) passed native checks and installer gates. The next release's isolated media backend spike is implemented and passes real Linux fixture transfers; native Windows and public YouTube acceptance remain open. YouTube UI, playlists and persistent media jobs are not implemented, and the next version number is undecided. The current development checkout is `main`. Windows browser acceptance, Firefox/Opera acceptance, Automatic stage 5, and multi-interface downloading remain open.
 
 This file describes current decisions and remaining work. [README.md](README.md) is the simple user guide, [BENCHMARKS.md](BENCHMARKS.md) records measured workloads, and [SESSION-LOG.md](SESSION-LOG.md) preserves development history. Implementation does not by itself mean release acceptance has passed.
 
@@ -20,15 +20,17 @@ Keep these priorities while continuing engine release verification alongside pro
 | 6 | Chrome capture and integration settings | 🔄 Current | Preview implemented; real popup consent, capture and master-disable fallback tested; normal setup/permission review remains |
 | 7 | Firefox and Opera rollout | ⬜ Todo | Manifests and shared implementation prepared; package-specific native verification is pending |
 | 8 | Browser packaging and acceptance | ⬜ Todo | Stable extension IDs, distribution, repair/uninstall, privacy, crash tests |
-| 9 | v1.0.0 Windows/Linux release | 🔄 Current | Native .deb/.exe installers, native Windows regressions and tag-only publishing gate; publication pending |
+| 9 | v1.0.0 Windows/Linux release | ✅ Done | Native .deb/.exe installers and checksums published after native test and installer gates; broader browser acceptance remains open |
 | 10 | Multi-interface experiment | ⬜ Todo | Prove routing, correct output, failover, and benefit on independent uplinks |
 | 11 | Authenticated browser downloads | ⬜ Todo | Separate consent, credential, request-replay, and recovery design |
+| 12 | YouTube videos and playlists | 🔄 Current | Stage 1 adapter/dependency spike implemented; real Linux fixture pipeline passed; native Windows/public YouTube acceptance pending before UI and persistent jobs |
+| 13 | Optional proxy routing per download | ✅ Done | Settings default, per-download Proxy/Direct controls, HTTP/HTTPS/SOCKS5, browser-intake defaults, CLI and media adapter; native Windows acceptance still required |
 
-### ➡️ Current: #9 — v1.0.0 Windows/Linux release
+### ➡️ Current: #12, stage 1 — Media backend spike and native acceptance
 
-### ⏭️ Next: #7–8 — Windows/Linux browser acceptance and store distribution
+### ⏭️ Next: #12 — Finish native/public acceptance, then stage 2 selection UI
 
-**Next concrete work:** Verify local paired builds and native .deb/.exe installation, push the prepared `release/v1.0.0` branch through the operator's GitHub Desktop sign-in, then push the annotated `v1.0.0` tag to run native Linux/Windows release checks. Only numeric `vMAJOR.MINOR.PATCH` tags matching the source version build/publish packages; branch pushes run ordinary CI. Existing releases are never replaced. Then perform operator browser acceptance on Windows and another Linux installation. Store submissions/signing and a graphical per-browser setup remain separate work.
+**Next concrete work:** Run the prepared Windows media CI job and verify a full public-YouTube media transfer through the working proxy. Public metadata extraction, the local transfer contract, generated MP4 merge, MP3 conversion, rate ceiling and process-tree cancellation are verified; they do not prove public media transfer or Windows runtime behavior. Build the single-video selection UI after these gates pass. Retain existing browser acceptance and store-distribution tasks. Only numeric `vMAJOR.MINOR.PATCH` tags matching the source version build/publish packages; branch pushes run ordinary CI. Preserve the published v1.0.0 tag and assets.
 
 ## Product scope and release boundaries
 
@@ -39,13 +41,14 @@ The v1 release targets are **Linux/amd64 and Windows/amd64**. Linux .deb install
 | v1.0.0: First desktop release (supersedes planned v0.1 naming) | CLI, HTTP/HTTPS, queue, parallel ranges, conditional resume, recovery, optional SHA-256, resource limits | Reproducible correctness/failure tests and packaged native smoke tests |
 | Desktop, parallel track | One Downloads list, shared settings, Automatic/Manual, migration, batch actions | Preserved user data and interactive acceptance |
 | Browser integration, parallel track | Optional Chrome/Firefox/Opera extensions and local native host | Tested handoff, browser fallback, per-browser consent, installation matrix |
+| Next release: YouTube media | Public single videos, finite playlists, available video/audio formats, merging and selected audio conversion | Staged media acceptance below; version number selected before release |
 | Later: Multi-interface experiment | Explicit network paths on one selected OS | Correct egress, output, and failover on independent real uplinks |
 | Later: Broader interface support | Remaining OS adapters | Native capability and privilege matrix |
 | Later | Authenticated browser downloads and adaptive interface scheduling | Separate security, replay, and routing designs |
 
 Desktop and browser work precede multi-interface development while retaining the engine correctness requirements. There are no fixed release dates or claims of complete IDM parity, guaranteed acceleration, or uninterrupted browsing.
 
-Outside current scope: website login automation, cookies/header credential storage, media extraction, streaming assembly, torrents, FTP/SFTP, cloud sync, remote administration, and automatic updates. Operator-approved query-string/CDN URLs are supported without cookie/header replay; expiry and single-use recovery are not guaranteed. No hosted service, database server, account system, or public control API is required. Scheduled queues, mirrors, notifications, metered-network controls, and a background service remain optional future work with a demonstrated need.
+Outside current scope: website login automation, cookies/header credential storage, live-stream recording, general-purpose media-site extraction, torrents, FTP/SFTP, cloud sync, remote administration, and automatic updates. YouTube extraction and assembly for completed public videos are now planned for the next release, through the separate media backend below. Operator-approved query-string/CDN URLs remain supported without cookie/header replay; expiry and single-use recovery are not guaranteed. No hosted service, database server, account system, or public control API is required. Scheduled queues, mirrors, notifications, metered-network controls, and a background service remain optional future work with a demonstrated need.
 
 ## Tech Stack Lock
 
@@ -53,12 +56,14 @@ Outside current scope: website login automation, cookies/header credential stora
 |---|---|---|
 | Engine and CLI | Go 1.26 baseline; standard library plus Windows adapters below | Root module `github.com/Parsania80/FluxGet` |
 | Desktop | Go 1.26.8; Fyne v2.8.2 and pinned dependencies | Separate `desktop/go.mod` and `desktop/go.sum`; no replacement UI framework |
-| Persistence | Versioned local JSON | Queue schemas 1/2 remain readable; first browser handoff uses backed-up schema 3; checkpoints remain v4; no database |
+| Persistence | Versioned local JSON | Queue schemas 1–4 readable; browser receipts use schema 3+, first proxy job uses backed-up schema 4; checkpoints remain v4; no database |
 | Browser extensions | Plain JavaScript, HTML, CSS, JSON; official WebExtensions APIs | Manifest V3 where supported, browser-specific background/manifest adapters; no initial framework |
 | Native bridge | Go native messaging; Linux Unix sockets; Windows go-winio named pipes | Browser-specific registration and explicit extension-ID allowlists |
 | Windows primitives | `golang.org/x/sys` v0.49.0; `github.com/Microsoft/go-winio` v0.6.4 | Windows-only locks/file IDs/SIDs/ACLs and cancellable local named pipes |
 | Release packaging | Python 3 standard library, dpkg-deb, Inno Setup 6, POSIX shell, Windows PowerShell, GCC/MinGW windres | Native GitHub Actions builds; .deb system installation and .exe per-user setup; checksums and uninstall; no hosted runtime |
 | Development packaging | Python 3 standard library | Copy extension assets and register selected native hosts; no Python dependency in the running Go app/extension |
+| YouTube spike | yt-dlp 2026.10.26 with EJS 0.8.0; Deno 2.9.8; FFmpeg/ffprobe N-128757-g4b42530309 | Explicit external development executables; SHA-256/artifact URLs in packaging/media-tools.lock.json; production packaging remains gated |
+| Proxy routing | Go standard-library net/http proxy transport; explicit yt-dlp --proxy | HTTP/HTTPS/SOCKS5 endpoints without credentials; direct ignores proxy environment; no new Go dependency |
 
 Packaging helpers use the Python standard library already available on the development host. Plain shell would make JSON/path handling more fragile; a separate Go packaging command would need another build step for simple file generation. The helpers add no third-party library or running-app dependency. Native host and extension runtime remain Go and plain JavaScript respectively. Windows adds x/sys for maintained Win32 calls and go-winio for cancellable named pipes with explicit ACLs, exclusive first-instance ownership and remote-client rejection. Handwritten syscall/overlapped-I/O code would substantially enlarge the security and cancellation surface; TCP loopback would require a separate authentication design. These dependencies are pinned in both Go modules and do not change Linux transfer behavior. Native installers use dpkg-deb on Linux and Inno Setup 6 on the Windows build runner. Inno supplies a standard setup wizard and uninstall entry with less custom scripting than NSIS; it is a build-time tool, not a downloader runtime dependency. Debian payloads install in /opt/fluxget with system Chrome/Firefox manifests; Windows keeps per-user registration.
 
@@ -112,7 +117,7 @@ The engine currently lives in the root `main` package. A future `cmd/` and `inte
 
 ### Persistence and recovery
 
-- Queue reads schemas 1–3. Without browser receipts it keeps schema 2; the first accepted browser handoff backs up `queue.json.before-browser` and writes schema 3. Old CLI builds cannot read it, so retain paired current executables and the backup. Checkpoint v4 records verified offsets/hashes within unfinished parts; versions 1–3 remain readable. Older executables cannot read all upgraded formats. Keep formats versioned and validate paths, identity, ranges, sizes, and partial availability before reuse.
+- Queue reads schemas 1–4. Without browser receipts or proxy jobs it keeps schema 2; the first accepted browser handoff backs up `queue.json.before-browser` and writes schema 3. Adding/enabling a proxy job through the scheduler backs up `queue.json.before-proxy` and writes schema 4, preserving browser receipts. Disabling that job's proxy does not downgrade the queue. Older CLI builds reject the upgraded format instead of silently losing routing, so retain paired current executables and the backup. Checkpoint v4 records verified offsets/hashes within unfinished parts; versions 1–3 remain readable. Keep formats versioned and validate paths, identity, ranges, sizes, and partial availability before reuse.
 - Synchronize partial data before publishing metadata: write temporary JSON in the metadata directory, sync and close it, then replace the record. Failed updates must not claim unsaved progress. Locks prevent duplicate FluxGet writers; unrelated programs can still race filesystem changes.
 - Parallel recovery requires a strong validator and validated ranges. Sequential recovery can instead compare the saved prefix with one fresh known-length response before appending; this redownloads the prefix and does not authenticate the source.
 - Prefix checkpoints occur after roughly 1 MiB or two seconds while data arrives, plus clean interruption. A crash may lose work since the last safe checkpoint. Unrecorded prefixes in older checkpoints cannot be recovered retroactively.
@@ -149,6 +154,20 @@ Display defaults to decimal MB/MB/s with KB/MB/GB options. The engine stores who
 Legacy queue/history/settings migration backs up originals, maps stable queue IDs and speed keys, and imports eligible checkpoints paused. Unimportable entries remain visible. Existing completed history and partial files are preserved; new browser intake will reuse the same scheduler.
 
 Still required: native interactive review of add/pause/resume/open-folder, migration, competing ownership, duplicate names, shared actions, units/limits, long filenames, unknown totals, keyboard navigation, accessibility, packaging, signing, and distribution. The operator approved the preview on 2026-11-09; this does not close every acceptance item.
+
+## Optional proxy routing
+
+**Implemented 2026-11-12:** `networkproxy/` supplies one validated configuration contract shared by the Go transfer engine, desktop and media adapter. It supports HTTP, HTTPS and SOCKS5/5h endpoints, including local v2ray ports. SOCKS addresses normalize to `socks5h` so both backends send destination hostnames to the proxy. The default is disabled; Direct uses the OS route without application-level proxying. System VPN/TUN routes are outside this setting.
+
+- Settings saves a proxy address and **Use proxy by default for new downloads**. The address remains available for a one-off proxied job when the default is off. The Add dialog has **Download with proxy**; browser handoffs snapshot the current default when the job is prepared. Changing defaults affects new jobs only.
+- Each row shows a **Proxy** or **Direct** button. Changing an existing job requires a paused/failed/canceled state and a completed browser handoff. The user can disable proxying without fixing or entering an address. Changing routes does not discard saved data or automatically resume the job; normal source/prefix/range validation still applies on resume.
+- Persist the chosen enabled endpoint with the job, not just in global preferences. Requests, probes, redirects, retries, parallel workers and recovery use a fresh transport with that same fixed route. Connections cannot leak between routes. First proxy use upgrades the backed-up queue to schema 4; direct-only legacy queues remain readable and do not migrate merely because the setting is available.
+- Direct explicitly bypasses HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY environment behavior. An enabled route always selects its endpoint, including for loopback targets, and fails without an automatic direct fallback. HTTP CONNECT retains normal destination TLS validation. Proxy bypass lists, PAC/system-proxy discovery and automatic route switching are not implemented.
+- Address validation rejects userinfo/passwords, query strings, fragments, unsupported schemes and subscription links without echoing the rejected input. This first version is for credential-free listening endpoints; authentication to a remote service can be handled by the user's local proxy client. Authenticated proxy profiles require a separate credential-storage design.
+- Standalone CLI transfers accept `-proxy <ADDRESS>`; empty means Direct. CLI queues retain per-job routing from their saved jobs; new proxy jobs and route edits use the desktop controls rather than a process-wide queue override. The media probe accepts the same flag and `media.NewWithProxy` applies it to analysis and transfer through explicit yt-dlp arguments. The later media UI must pass the selected job route to that constructor.
+- Tests cover HTTP routing, environment bypass, no fallback, verified HTTPS CONNECT, SOCKS remote DNS, parallel ranges/redirects, per-job persistence and route-edit guards, browser receipts under schema 4, CLI routing, settings/toggle/row reuse and real yt-dlp proxy-on/direct-off fixture transfers. Linux runtime evidence and Windows cross-builds do not substitute for native Windows acceptance.
+
+Transport references: [Go HTTP transport proxy behavior](https://pkg.go.dev/net/http#Transport), [yt-dlp proxy options](https://github.com/yt-dlp/yt-dlp#network-options). Proxy support does not itself establish that a particular public YouTube sample is reachable.
 
 ## Automatic download management
 
@@ -251,7 +270,7 @@ Effective readiness requires master, browser, profile consent, and extension rea
 ### Implementation and native evidence (2026-11-10)
 
 - `browserbridge/` defines strict version-1 framing, 64 KiB messages, URL/filename checks, persisted master/browser/profile policy, exclusions, and bounded Linux IPC. `cmd/fluxget-native-host` validates the pinned browser extension identity and relays to the existing owner; it can activate the sibling desktop when closed, without creating a separate scheduler. Closed-app activation still needs broader native acceptance.
-- `queue_browser.go` persists up to 2,048 request receipts in schema 3. Prepare creates one paused job without network activity; only confirmed cancellation activates it. Replayed IDs cannot create duplicates or resume a user-paused job, and receipts survive list removal. Unconfirmed jobs cannot be started through normal Resume. Expired/disabled/Download-later handoffs remain paused after confirmed cancellation.
+- `queue_browser.go` persists up to 2,048 request receipts in schema 3 or 4. Prepare creates one paused job without network activity; only confirmed cancellation activates it. Replayed IDs cannot create duplicates or resume a user-paused job, and receipts survive list removal. Unconfirmed jobs cannot be started through normal Resume. Expired/disabled/Download-later handoffs remain paused after confirmed cancellation.
 - `desktop/browser_integration.go` adds master and independent Chrome/Firefox/Opera controls, ask/automatic/manual modes, excluded hosts, profile consent counts/disconnect, destination prompts and native error responses. It uses the same queue client and owner, with one browser prompt at a time.
 - `extensions/src/` is shared plain JavaScript/CSS/HTML with separate MV3 manifests/background adapters. The pinned Chromium ID is `phfanjlpchehjklocnblfjdhgmlcjoaa`; Firefox uses `fluxget@parsania80.github.io`. The popup exposes connection/profile consent, one-time all-website access/removal, limited-grant readiness, a 15-minute bypass and pending-handoff recovery. Manual sending uses the link context menu. Exclusions remain in the existing desktop policy rather than a separate popup list.
 - Capture observes only explicitly granted sites through optional `webRequest`/host permissions. It requires one matching original-to-final GET trace, observed request headers with no Cookie/Authorization/Range, current site/profile policy, a non-private active browser item marked safe, and an HTTP/HTTPS URL without embedded credentials/fragments. Operator-approved query-string/CDN support preserves the final URL exactly through native transport, durable receipt validation and engine intake. Diagnostics redact URLs; local transfer metadata retains them. The popup displays specific fallback reasons near the top. It stores only credential-presence booleans, never cookie/header values. Unknown, cached, ambiguous, partially observed, POST, warning/scan-pending and unsupported requests stay in the browser. Site grants are checked again before cancellation. Capture is bounded to four concurrent attempts and 32 recoverable client records.
@@ -294,6 +313,103 @@ Browser acceptance remains open:
 - [ ] Instant downloads, simultaneous/duplicate events, disable during handoff, extension suspension, browser exit, and every handoff crash boundary.
 - [ ] Unsupported, private-without-consent, unsafe, and security-blocked inputs follow the fallback policy.
 - [ ] Manual install, approval, connection test, capture, repair, update, and uninstall on each claimed browser/package combination.
+
+## YouTube videos and playlists — next release plan
+
+**Requested 2026-11-12; stage 1 spike implemented, full feature not available.** Add an explicit YouTube intake to the existing Downloads experience. Start with completed, public videos and finite playlists accessible without a login. Support standard watch links, `youtu.be` links, Shorts and playlist links. A watch link containing a playlist must ask **This video** or **Choose from playlist**, defaulting to the single video. Do not start a playlist merely because its ID is in the URL. The development probe deliberately handles only that single video; it rejects playlist-only URLs.
+
+### Backend choice and dependency boundary
+
+| Approach | Benefits | Costs / decision |
+|---|---|---|
+| Go adapter around yt-dlp plus FFmpeg | Established extraction and media handling; Go keeps ownership of UI, queue and files | Additional executables and upstream changes; recommended plan, subject to stage 1 verification |
+| Native Go extractor and media pipeline | Fewer external programs and direct engine integration | FluxGet must maintain YouTube extraction, manifests and muxing; defer until a proven need |
+| Extract stream URLs and give them to the current range engine | Potential reuse of direct-download controls | Expiring URLs, segmented protocols and representation changes need new contracts; defer beyond the first media release |
+
+yt-dlp owns extraction and media transfer; FFmpeg/ffprobe handle merging, conversion and output inspection. Use structured metadata/progress rather than parsing human-readable console messages. These capabilities and interfaces are documented in [yt-dlp's upstream guide](https://github.com/yt-dlp/yt-dlp#embedding-yt-dlp).
+
+Current YouTube extraction also needs EJS scripts and a supported JavaScript runtime. Plan for pinned Deno and locally supplied, compatible EJS components; validate the selected standalone artifact's contents instead of assuming it contains every dependency. See [upstream EJS setup](https://github.com/yt-dlp/yt-dlp/wiki/EJS). This adds a media-tool runtime boundary; the existing Go engine and browser native host do not gain a Python runtime requirement.
+
+The spike resolves explicit absolute tool paths, probes native versions and rejects missing tools; there is no PATH search or self-updater. A Python standard-library helper downloads SHA-256-locked standalone tools into an explicit development directory. On the current host these are under `/tmp/fluxget-media-tools`, not installed system-wide or shipped in v1 installers. Go modules/dependencies remain unchanged. Production dependency installation/notices remain a later release gate.
+
+### User experience and format choices
+
+1. Choose **Add YouTube download**, paste a link and analyze it without downloading the media. Show title, duration and available outputs; bounded metadata work must be cancelable.
+2. Choose **Video** or **Audio only**, an output format, quality and destination. Default to an available MP4-compatible video/audio combination up to 1080p; if unavailable, offer the best supported alternative explicitly. Never invent a quality or silently upscale.
+3. Offer MP4, WebM and MKV only where the selected source codecs and container are compatible. Show resolution, frame rate, codec, audio track/language and exact or estimated size when known. A container extension is not a quality setting; prefer merging/remuxing without re-encoding video.
+4. Offer M4A/AAC and Opus when available, plus MP3 conversion with an explicit bitrate choice. Explain that converting to MP3 takes extra processing and does not improve source quality. Broad video transcoding, subtitles and thumbnail embedding can follow later.
+5. For playlists, show a bounded, paginated preview with select-all/individual selection, original order and unavailable-entry status. Fetch detailed formats only for selected items. Start with 100 entries per page and a 1,000-item admission cap per batch; larger imports require another explicit batch rather than unbounded expansion.
+6. Apply a preferred format/maximum quality to selected videos, resolve it per item and preview exceptions. Let the user accept a lower available quality or skip the item; do not silently change video to audio-only. Show estimated disk requirements, or Unknown, before confirmation.
+7. Confirm **Download now** or **Download later**. Show individual videos in Downloads with an optional playlist group, per-video progress and a completed/failed/skipped summary. Successful items remain successful when another item fails; retry only failed or selected entries.
+
+### Planned ownership, persistence and controls
+
+```text
+Add YouTube link -> Go media adapter -> bounded metadata -> selection preview
+    -> existing queue owner -> media job -> yt-dlp -> owned job workspace
+    -> merge / convert -> ffprobe validation -> safe final publication
+    -> existing Downloads rows, speed, status and playlist summary
+```
+
+- `media/` now provides the isolated subprocess adapter for metadata, explicit format selection, scratch transfers, structured progress, cancellation and ffprobe inspection. Add scheduler integration in a proposed `queue_media.go` and desktop intake later; no direct HTTP implementation or persistent job schema changed in stage 1.
+- The existing queue owner remains the sole admission/persistence authority. Admit one selected video as one job, not an entire untracked playlist process. Persist backend type, original source URL/video ID, selected output policy, destination, tool compatibility information and playlist order/group. Deduplicate repeated submission using video ID plus output profile while allowing an explicit different-quality copy.
+- Introduce a backed-up, versioned queue migration before media jobs can be saved; retain old direct-download records and v4 checkpoints unchanged. Media sidecars live in a private job workspace and use a separate versioned recovery contract. Older clients must reject unsupported media schemas clearly. Restored unfinished jobs remain paused.
+- Use absolute tool paths and argument arrays, no shell command interpolation or user-provided extra flags. Isolate user tool configuration/plugins; disable implicit updates and unapproved remote component installation. Restrict intake to supported YouTube URLs, sanitize filenames and diagnostics, bound metadata/progress/log buffers, and retain TLS checks. Do not import browser cookies or expose signed stream URLs in logs.
+- Treat media titles, thumbnails, metadata and tool-reported paths as untrusted. Stage inside an owned workspace on the destination filesystem; verify path containment, reject symlink/reparse escapes, reserve output names and never overwrite unrelated files. Delete only verified job-owned temporary files.
+- Keep discovery, download, merge and conversion as distinct phases. Network speed is meaningful during transfer; merging/converting shows a separate status. Do not show yt-dlp fragments as FluxGet range connections or claim that a merge is another download. Completion requires successful post-processing, ffprobe checks for expected streams/container/duration and safe no-overwrite publication.
+- Pause/cancel must stop the whole process tree, including FFmpeg and the JavaScript runtime, on both OSes. Attempt bounded graceful shutdown, then terminate if necessary; retain recoverable owned files. Test resumability rather than promising byte-exact continuation for every media format. Re-resolve expired URLs from the original video and validate source/format identity before reusing partial media; a changed selection starts a new workspace.
+- Count media jobs against the global simultaneous-download ceiling. Start with one media transfer and one fragment at a time, and one post-processing task. Existing Go request leases, adaptive worker changes and limiter do not automatically govern external processes. Stage 1 must define explicit subprocess limits; defer adaptive media concurrency until measurements are reliable.
+- Honor individual and default speed ceilings through the adapter. Until aggregate mixed-backend limiting is proven, a shared speed ceiling serializes all transfers while media is active and applies the shared ceiling to that media process. Reconfiguration must acknowledge an applied cap or safely pause/restart; never silently ignore it. Verify actual aggregate speed before claiming shared-limit support.
+- Browser support starts with an explicit **Send video/playlist to FluxGet** action and the same preview/confirmation. Do not capture normal YouTube page navigation or individual playback segments as ordinary downloads. Reuse the existing browser consent, profile, disable and bypass controls.
+
+### Staged implementation roadmap
+
+| Stage | Task | Status | Required result / verification |
+|---|---|---|---|
+| 1 | Dependency and backend spike | 🔄 Current | Adapter, artifact lock, tools helper and probe command implemented; real Linux merge/audio/cap and fixture contracts pass; public metadata passed through v2ray; Windows native CI and public media transfer remain open |
+| 2 | Single-video selection UI | ⬜ Todo | Analyze/cancel, Video/Audio choices, available quality/container, destination and clear missing-tool/unavailable-format errors; no transfer before confirmation |
+| 3 | Persistent media jobs | ⬜ Todo | Backend dispatch, queue migration/rollback boundary, progress phases, speed ceilings, process-tree shutdown, owned output publication and restart-paused recovery |
+| 4 | Playlist selection and admission | ⬜ Todo | Bounded enumeration, chosen entries, per-item format resolution, stable order, deduplication, partial success and retry-failed; no duplicate work after crash |
+| 5 | Recovery and resource acceptance | ⬜ Todo | Pause/reopen, expired links, interrupted merge/conversion, full disk, missing tools, source changes, mixed direct/media limits and CPU/memory/storage impact |
+| 6 | Optional browser entry point | ⬜ Todo | Explicit send action for video/playlist pages, preview and consent; ordinary playback/navigation and current direct-link capture remain correct |
+| 7 | Native packaging and release | ⬜ Todo | .deb/.exe include required tool setup, notices, checksums and diagnostics; clean-machine install/repair/uninstall and media acceptance pass; choose/bump version only then |
+
+**Next acceptance step:** Run the native media CI matrix and a full transfer of an explicitly selected public YouTube sample before closing stage 1. Public metadata extraction has already passed through the local proxy. Do not replace the existing HTTP engine or claim the UI/playlist feature is ready.
+
+### Stage 1 implementation and evidence
+
+- `media/` exposes sanitized video/format metadata, validates actual format IDs/container compatibility, and runs one operation per client with one native fragment. Progress contains scalar counters only; signed stream URLs and raw stderr are not returned. Phase records on stdout and stderr use separate bounded parsers. Unknown totals remain unknown; transfer counters can restart for the next audio/video component and are not yet aggregate queue progress.
+- Transfers create an opaque private scratch workspace and inspect output streams/container/duration with ffprobe. They do not publish final user files or offer persistent resume. Scratch paths are returned on errors for inspection; cleanup/publication and crash recovery belong to later stages. The probe's MP4 choice is conservative H.264/AAC up to 1080p; other compatible selections are exposed by the adapter, not a finished UI.
+- Linux/macOS cancellation targets the process group with a bounded interrupt/kill sequence. Windows starts suspended, attaches a kill-on-close Job Object before resuming, and terminates the entire job on cancellation; graceful Windows checkpoint recovery is not claimed. A generated child-writer test verifies cancellation and normal-exit cleanup, instead of assuming killing the parent kills FFmpeg.
+- The cap is fixed for a run and measured against real fixture bytes. A cap change requires cancellation/restart until stage 3 supplies scheduler acknowledgment. External media requests are not covered by the current Go engine leases or shared limiter; mixed-backend scheduling is not implemented. All program arguments are generated internally, with no arbitrary tool flags or browser-cookie import.
+
+| Evidence | Result | Limit |
+|---|---|---|
+| Native Linux tool probe | yt-dlp 2026.10.26, EJS 0.8.0, Deno 2.9.8 and FFmpeg/ffprobe N-128757-g4b42530309 verified | Tools are development-only; exact upstream archive checksums pinned |
+| Generated local media | Real yt-dlp downloaded separate H.264/AAC streams and FFmpeg merged MP4; separate MP3 conversion passed ffprobe checks | Tests use a loopback server and explicit private fixture info, not public extraction |
+| Rate ceiling | 76,550 transfer bytes over about 5.6 seconds with a 16,384 B/s ceiling; structured download and processing phases observed | Single operation; no shared/live limit claim |
+| Regression checks | Root race suite, media fixtures/process-tree tests, vet, Windows test/probe cross-build and macOS package cross-build pass | Native Windows media matrix is prepared in ci.yml, not yet run |
+| Public YouTube sample | Direct probe initially had no network; with operator-started v2rayN, installed adapter analyzed documented sample YE7VzlLtp-4 (597 seconds, 49 formats). Older clip BaW_jenozKc is unavailable | Public metadata extraction passed via socks5://127.0.0.1:10808; full public media transfer and native Windows acceptance remain open; no cookies/login used |
+
+Development-only commands (ordinary app users do not need these):
+
+```bash
+python3 packaging/setup_media_tools.py --directory "$PWD/dist/media-tools"
+go run ./cmd/fluxget-media-spike -tools "$PWD/dist/media-tools/tools.json" -mode probe
+FLUXGET_MEDIA_TOOLS="$PWD/dist/media-tools/tools.json" go test -race -v ./media
+```
+
+For an explicitly selected public sample, use the command's `-mode analyze -url "<PUBLIC_YOUTUBE_VIDEO_URL>"`; `-mode video` or `-mode mp3` also needs `-directory "<ABSOLUTE_SCRATCH_PARENT>"` and optionally `-limit <BYTES_PER_SECOND>`. Add `-proxy "<PROXY_ADDRESS>"` to analyze/download through a configured local proxy. `FLUXGET_MEDIA_TEST_URL` enables the opt-in public metadata test, with optional `FLUXGET_MEDIA_PROXY` for its route. Ordinary CI uses only generated local media and never needs YouTube access. The pinned development FFmpeg artifact is a GPL build; it is not bundled into production installers by this change, and its redistribution/source obligations must be resolved before stage 7.
+
+### Packaging, maintenance and release acceptance
+
+- Plan application-managed, pinned standalone yt-dlp and Deno artifacts with matching local EJS. On Debian/Ubuntu declare FFmpeg/ffprobe package requirements; on Windows include tested executables. Verify Linux glibc/architecture and Windows runtime compatibility against the existing release baselines. Users should not need pip, a terminal or manual tool downloads for normal installation.
+- Record artifact provenance, hashes, exact versions, component licenses and notices in the build manifest; inspect the selected FFmpeg build configuration and redistribution obligations before shipping. FFmpeg's license depends on its enabled components; use its [official licensing reference](https://ffmpeg.org/legal.html), not an assumed blanket license.
+- Ship dependency changes through tested FluxGet releases initially. YouTube can change independently; surface an actionable unsupported-extractor/update error and provide a maintenance-release path. Do not run the extractor's self-updater or fetch executable components silently. A future in-app tool updater needs its own verified-download/rollback design.
+- Deterministic CI uses fake tool processes, captured metadata and generated local media fixtures for selection, fragmented progress, process errors, malformed/oversized output, post-processing and publication. Do not make ordinary CI depend on YouTube availability.
+- Native opt-in acceptance uses a small, documented public sample set with permission to download: single video, Shorts, finite playlist, mixed qualities, MP4/WebM/MKV where available, native audio and MP3 conversion. Compare inspected streams/duration and playback, not just subprocess exit codes; record tool versions and unavailable combinations.
+- Include unavailable/deleted/private playlist entries, login-required results, rate limits, network loss, destination conflicts, Unicode/long paths, low disk, stalled subprocesses, kill/reopen and orphan cleanup. Preserve completed items and existing direct-download behavior in every failure path.
+- Initial scope excludes DRM-protected content, paid/private/login-required videos, browser-cookie import, restriction bypass and live/upcoming recording. Support downloads the user is authorized to save; other extractors stay disabled even if the bundled tool supports them. No claim of universal YouTube availability or guaranteed resume.
 
 ## Multi-interface downloading — later
 

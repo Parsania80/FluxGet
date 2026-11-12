@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "purpose": "Stage-1 development probes only; not included in FluxGet release installers",
+  "versions": {
+    "yt_dlp": "2026.10.26",
+    "ejs": "0.8.0",
+    "deno": "2.9.8",
+    "ffmpeg_build": "N-128757-g4b42530309"
+  },
+  "platforms": {
+    "linux-amd64": {
+      "yt_dlp": {
+        "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp_linux",
+        "sha256": "767ba9dce7052aa196f8b12652f433d76de128ba168966fa84b6394d5e6c6795",
+        "name": "yt-dlp_linux"
+      },
+      "deno": {
+        "url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-unknown-linux-gnu.zip",
+        "sha256": "e890975bc2549807bbcc0b584ffafda72cc7c93349dd99c80483dd784f6c4609",
+        "name": "deno-x86_64-unknown-linux-gnu.zip"
+      },
+      "ffmpeg": {
+        "url": "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-11-10-20-59/ffmpeg-N-128757-g4b42530309-linux64-gpl.tar.xz",
+        "sha256": "8c6151f3b1d74584a86db504df8251b34e701fd06a5cd222cb168fa1db5e947d",
+        "name": "ffmpeg-N-128757-g4b42530309-linux64-gpl.tar.xz"
+      }
+    },
+    "windows-amd64": {
+      "yt_dlp": {
+        "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe",
+        "sha256": "f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d",
+        "name": "yt-dlp.exe"
+      },
+      "deno": {
+        "url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-pc-windows-msvc.zip",
+        "sha256": "cba84b26e0df5ae7f74fc66b86a95b866872a86292ebd84fa1e959927edd93bf",
+        "name": "deno-x86_64-pc-windows-msvc.zip"
+      },
+      "ffmpeg": {
+        "url": "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-11-10-20-59/ffmpeg-N-128757-g4b42530309-win64-gpl.zip",
+        "sha256": "a12bc11e652ee45d2cde04167d1fdcbf5c964df2e2f532eaf5a7f8bcce1d9260",
+        "name": "ffmpeg-N-128757-g4b42530309-win64-gpl.zip"
+      }
+    }
+  }
+}
