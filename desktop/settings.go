@@ -27,6 +27,7 @@ type speedSettings struct {
 	MaxActive      int              `json:"max_active,omitempty"`
 	Connections    int              `json:"connections,omitempty"`
 	Folder         string           `json:"folder,omitempty"`
+	SortFiles      bool             `json:"sort_files"`
 	Overall        int64            `json:"overall_kib,omitempty"`
 	DisplayUnit    string           `json:"display_unit,omitempty"`
 	ManagementMode string           `json:"management_mode,omitempty"`
@@ -41,7 +42,7 @@ func loadSpeedSettings() (*speedSettings, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &speedSettings{path: filepath.Join(dir, "fluxget", "desktop-speed.json"), Overrides: map[string]int64{}, MaxActive: 5, Connections: 4, DisplayUnit: "MB", ManagementMode: "automatic", TotalRequests: 8, OriginRequests: 4}
+	s := &speedSettings{path: filepath.Join(dir, "fluxget", "desktop-speed.json"), Overrides: map[string]int64{}, MaxActive: 5, Connections: 4, SortFiles: true, DisplayUnit: "MB", ManagementMode: "automatic", TotalRequests: 8, OriginRequests: 4}
 	data, err := platformfile.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return s, s.save()
@@ -292,6 +293,10 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool,
 	folder := widget.NewEntry()
 	folder.SetText(s.Folder)
 	folder.SetPlaceHolder("Your Downloads folder")
+	sortFiles := widget.NewCheck("Sort new downloads into file-type folders", nil)
+	sortFiles.SetChecked(s.SortFiles)
+	sortNote := widget.NewLabel("Music, Videos, Pictures, Documents, Archives, Programs and Other inside the download folder. Existing downloads stay where they are.")
+	sortNote.Wrapping = fyne.TextWrapWord
 	browse := widget.NewButtonWithIcon("Browse…", theme.FolderOpenIcon(), func() {
 		dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
 			if err != nil {
@@ -357,6 +362,7 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool,
 			return
 		}
 		next.Folder = strings.TrimSpace(folder.Text)
+		next.SortFiles = sortFiles.Checked
 		if next.Folder != "" {
 			info, e := os.Stat(next.Folder)
 			if !filepath.IsAbs(next.Folder) || e != nil || !info.IsDir() {
@@ -398,7 +404,7 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool,
 	unitNote.Wrapping = fyne.TextWrapWord
 	general := container.NewVBox(
 		widget.NewCard("Files & display", "", container.NewVBox(widget.NewForm(
-			widget.NewFormItem("Default folder", container.NewBorder(nil, nil, nil, browse, folder)), widget.NewFormItem("Data unit", unit)), unitNote)),
+			widget.NewFormItem("Default folder", container.NewBorder(nil, nil, nil, browse, folder)), widget.NewFormItem("Data unit", unit)), sortFiles, sortNote, unitNote)),
 		widget.NewCard("Speed limits", "", container.NewVBox(enabled, limits, speedNote)))
 	connectionsPage := container.NewVBox(widget.NewCard("Download management", "", container.NewVBox(managementNote,
 		widget.NewForm(widget.NewFormItem("Mode", mode), widget.NewFormItem("Simultaneous downloads", active), widget.NewFormItem("Connections per download", connections)),

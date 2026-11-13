@@ -295,6 +295,39 @@ func TestYouTubePlaylistShowsOnlyRelevantOutputSettings(t *testing.T) {
 	}
 }
 
+func TestYouTubePlaylistSortingAndInvalidation(t *testing.T) {
+	y, queue := youtubeTestView(t)
+	loadPlaylistFixture(t, y, queue)
+	var calls []string
+	y.analyzer = playlistAnalyzer(&calls)
+	p := y.playlist
+	p.choose(p.page.Entries[0], true)
+	p.sortFiles.SetChecked(true)
+	for _, tc := range []struct{ kind, format, folder string }{
+		{"Video", "MP4", "Videos"}, {"Audio only", "M4A", "Music"},
+	} {
+		p.kind.SetSelected(tc.kind)
+		p.format.SetSelected(tc.format)
+		test.Tap(p.prepare)
+		if !p.sortFiles.Disabled() {
+			t.Fatal("sorting can change while formats are being prepared")
+		}
+		finishPlaylist(t, y, queue)
+		if len(p.jobs) != 1 || filepath.Dir(p.jobs[0].Destination) != filepath.Join(p.folder.Text, tc.folder) || !strings.HasPrefix(filepath.Base(p.jobs[0].Destination), "000001 - ") {
+			t.Fatalf("wrong sorted playlist admission: %+v", p.jobs)
+		}
+	}
+	p.sortFiles.SetChecked(false)
+	if len(p.jobs) != 0 || p.batch != "" || !p.download.Disabled() {
+		t.Fatal("sorting change retained stale prepared destinations")
+	}
+	test.Tap(p.prepare)
+	finishPlaylist(t, y, queue)
+	if len(p.jobs) != 1 || filepath.Dir(p.jobs[0].Destination) != p.folder.Text {
+		t.Fatal("playlist sorting opt-out ignored")
+	}
+}
+
 func TestYouTubePlaylistMixExplainsSingleVideoAlternative(t *testing.T) {
 	y, queue := youtubeTestView(t)
 	calls := 0

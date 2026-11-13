@@ -60,6 +60,14 @@ Select a row to show its actions, or use checkboxes for a group. The bottom bar 
 
 Removing an item from the list keeps its files. Deleting files is a separate action that requires confirmation.
 
+### Sort downloads into folders
+
+New development builds automatically sort new downloads inside your chosen download folder: **Music**, **Videos**, **Pictures**, **Documents**, **Archives**, **Programs** and **Other**. For example, `song.mp3` goes into `Downloads/Music` and `report.pdf` into `Downloads/Documents`. Unknown extensions go into Other.
+
+Use **Settings → General → Sort new downloads into file-type folders** to change the default, then **Save settings**. You can also turn sorting off for an individual download in Add download, the browser confirmation or the YouTube output settings. Automatic browser capture uses the saved default. YouTube audio goes into Music and video into Videos; playlist filenames keep their order numbers. Sorting follows the final filename extension, including a safe filename supplied by an HTTP server.
+
+Sorting starts enabled when settings have no previous preference. Existing queued or downloaded files stay in place, and existing files are never silently overwritten. The paired Linux preview now includes this feature; it remains outside the published v1.0.0 release.
+
 ## Download through a proxy
 
 Available in development builds; not included in v1.0.0.
@@ -74,9 +82,9 @@ A failed proxy reports an error and never falls back to Direct automatically. Yo
 
 Available in development builds; not included in v1.0.0.
 
-Open **YouTube**, paste a public video or Shorts link, and choose **Analyze**. You can cancel analysis or use your configured proxy. Choose **Video** or **Audio only**, an available format and quality, then a folder and filename. Click **Download** to start it in the Downloads list. Use the usual pause, resume and speed controls there. Unfinished jobs reopen paused; damaged or unverified saved media may require **Restart media from beginning**. A rejected saved download range (HTTP 416) can also require an explicit restart; the development source now explains this error. The development source also removes the fixed 30-minute transfer cutoff while keeping pause/cancel and network timeouts. These updates are not installed in the local preview yet. The locally installed Linux preview also supports selecting playlist entries; the normal-playlist preview was approved by the operator on 2026-11-13.
+Open **YouTube**, paste a public video or Shorts link, and choose **Analyze**. You can cancel analysis or use your configured proxy. Choose **Video** or **Audio only**, an available format and quality, then a folder and filename. Click **Download** to start it in the Downloads list. Use the usual pause, resume and speed controls there. Unfinished jobs reopen paused; damaged or unverified saved media may require **Restart media from beginning**. A rejected saved download range (HTTP 416) can also require an explicit restart; the development source now explains this error. The development source also removes the fixed 30-minute transfer cutoff while keeping pause/cancel and network timeouts. These updates are included in the paired Linux preview installed on 2026-11-13. The locally installed Linux preview also supports selecting playlist entries; the normal-playlist preview was approved by the operator on 2026-11-13.
 
-The locally installed preview includes the prepared media tools beside the app. Other development builds need these tools configured. If they are not configured, open **Media tools** and choose their `tools.json` manifest. See the [development setup and roadmap](project.md#youtube-videos-and-playlists--next-release-plan). A full public audio-to-MP3 download passed on Linux. A public 720p video/audio merge also passed full decoding. The acceptance branch passed native Windows media/proxy checks, but its desktop tests encountered a fixture path error. That fixture now uses an absolute path on both platforms; a fresh Windows CI run is pending.
+The locally installed preview includes the prepared media tools beside the app. Other development builds need these tools configured. If they are not configured, open **Media tools** and choose their `tools.json` manifest. See the [development setup and roadmap](project.md#youtube-videos-and-playlists--next-release-plan). A full public audio-to-MP3 download passed on Linux. A public 720p video/audio merge also passed full decoding. The media baseline passed native Linux/Windows media/proxy and desktop-control checks in [CI run 43481879691](https://github.com/Parsania80/FluxGet/actions/runs/43481879691) and was merged into main. Subsequent folder-sorting changes still need native Windows CI.
 
 The installed Linux single-video preview was approved by the operator on 2026-11-13; its hands-on preview review is done. Remaining acceptance work includes native Windows desktop checks, a fresh run of the current branch and broader recovery testing; normal-playlist selection is installed locally and was approved by the operator on 2026-11-13. All four entries of a public sample playlist completed as M4A through an isolated persistent queue, with no failures. Stage-5 testing is underway: isolated Linux checks cover interrupted processing, refreshed links, full disk, mixed-download speed limits, one-hour media and bounded CPU/memory pressure. Extended wall-clock/storage and native/public checks remain open.
 
@@ -128,7 +136,7 @@ Resume uses the same output path and requires a valid saved checkpoint. The stan
 
 ## Development
 
-New development uses `main`; the current acceptance branch is `codex/stage5-media-acceptance`, prepared for a GitHub Desktop push and Windows CI. The first release is preserved as tag `v1.0.0`. Only version tags publish installers.
+New development uses `main`; the passing media-acceptance branch has been merged. File-type folder sorting is installed in the local Linux preview and passed isolated installed-engine checks. The feature branch `codex/file-type-folders` is ready to publish through GitHub Desktop; branch pushes run Linux and Windows CI, including sorting, queue recovery and preference checks. Native Windows results remain pending. The first release is preserved as tag `v1.0.0`. Only version tags publish installers.
 
 The engine and desktop are separate Go modules. Run checks in both:
 

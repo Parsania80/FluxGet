@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Parsania80/FluxGet/internal/downloadcategory"
 	"github.com/Parsania80/FluxGet/internal/platformfile"
 	"github.com/Parsania80/FluxGet/media"
 	"github.com/Parsania80/FluxGet/networkproxy"
@@ -99,6 +100,9 @@ func queueDestinationAvailable(q queueData, destination string, except int) erro
 }
 
 func desktopAdd(q *queueData, input queueJob, adopt bool) (int, error) {
+	if input.SortFiles && (adopt || !input.AutomaticName || input.Media != nil || input.IntakeID != "" || filepath.Base(filepath.Dir(input.Destination)) != downloadcategory.Folder(filepath.Base(input.Destination))) {
+		return 0, errors.New("invalid download category destination")
+	}
 	if input.Media != nil {
 		if adopt {
 			return 0, errors.New("media downloads must be restored by their queue")

@@ -279,7 +279,7 @@ func TestBrowserNativeChromeAcceptance(t *testing.T) {
 	if e != nil || !bytes.Equal(bypass, payload) {
 		t.Fatal("Ctrl-click browser output mismatch", e)
 	}
-	data, e := os.ReadFile(filepath.Join(settings.Folder, "native.iso"))
+	data, e := os.ReadFile(filepath.Join(settings.Folder, "Other", "native.iso"))
 	if e != nil || !bytes.Equal(data, payload) {
 		t.Fatal("native handoff output mismatch", e)
 	}

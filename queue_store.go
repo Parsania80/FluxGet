@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Parsania80/FluxGet/internal/downloadcategory"
 	"github.com/Parsania80/FluxGet/internal/platformfile"
 	"github.com/Parsania80/FluxGet/media"
 	"github.com/Parsania80/FluxGet/networkproxy"
@@ -33,6 +34,7 @@ type queueJob struct {
 	ExpectedSHA256 string               `json:"expected_sha256,omitempty"`
 	Cleanup        *cleanupIntent       `json:"cleanup,omitempty"`
 	AutomaticName  bool                 `json:"automatic_name,omitempty"`
+	SortFiles      bool                 `json:"sort_files,omitempty"`
 	Message        string               `json:"message,omitempty"`
 	Progress       string               `json:"progress,omitempty"`
 	Conflict       string               `json:"conflict,omitempty"`
@@ -128,6 +130,9 @@ func loadQueue(path string) (queueData, error) {
 		}
 		if j.ID < 1 || j.ID >= q.NextID || ids[j.ID] || destinations[j.Destination] || !filepath.IsAbs(j.Destination) || filepath.Clean(j.Destination) != j.Destination || !validQueueURL(j.URL) {
 			return q, errors.New("invalid queue job")
+		}
+		if j.SortFiles && (!j.AutomaticName || j.Media != nil || j.IntakeID != "" || filepath.Base(filepath.Dir(j.Destination)) != downloadcategory.Folder(filepath.Base(j.Destination))) {
+			return q, errors.New("invalid download category destination")
 		}
 		switch j.State {
 		case "queued", "running", "paused", "failed", "completed", "canceled", "resetting":

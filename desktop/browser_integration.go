@@ -178,7 +178,7 @@ func (b *browserIntegration) handle(ctx context.Context, r browserbridge.Request
 				respond(browserbridge.Failure("Capture is disabled for this browser, profile or site"))
 				return
 			}
-			begin := func(folder, filename string, later bool) {
+			begin := func(folder, filename string, later, sortFiles bool) {
 				if ctx.Err() != nil {
 					respond(browserbridge.Failure("Handoff timed out; use the browser"))
 					return
@@ -199,7 +199,11 @@ func (b *browserIntegration) handle(ctx context.Context, r browserbridge.Request
 					return
 				}
 				v.workResult(func(q *queueClient) (desktopResponse, error) {
-					output, err := platformcmd.Command(v.executable, append([]string{"-suggest-output"}, downloadArgs(r.URL, folder, filename)...)...).Output()
+					args := append([]string{"-suggest-output"}, downloadArgs(r.URL, folder, filename)...)
+					if sortFiles {
+						args = append(args, "-sort-files")
+					}
+					output, err := platformcmd.Command(v.executable, args...).Output()
 					if err != nil {
 						return desktopResponse{}, fmt.Errorf("cannot choose the download folder or filename")
 					}
@@ -217,7 +221,7 @@ func (b *browserIntegration) handle(ctx context.Context, r browserbridge.Request
 				// protocol result rather than waiting for the entire browser timeout.
 			}
 			if p.Mode == "automatic" && r.Kind == "capture" {
-				begin(v.settings.Folder, r.Filename, false)
+				begin(v.settings.Folder, r.Filename, false, v.settings.SortFiles)
 				return
 			}
 			folder, name := widget.NewEntry(), widget.NewEntry()
@@ -225,8 +229,10 @@ func (b *browserIntegration) handle(ctx context.Context, r browserbridge.Request
 			folder.SetPlaceHolder("Downloads folder")
 			name.SetText(r.Filename)
 			later := widget.NewCheck("Save paused for later", nil)
+			sortFiles := widget.NewCheck("Sort into a file-type folder", nil)
+			sortFiles.SetChecked(v.settings.SortFiles)
 			b.promptID = r.Key()
-			prompt := dialog.NewForm("Download with FluxGet?", "Use FluxGet", "Use browser", []*widget.FormItem{widget.NewFormItem("Folder", folder), widget.NewFormItem("Filename", name), widget.NewFormItem("", later)}, func(yes bool) {
+			prompt := dialog.NewForm("Download with FluxGet?", "Use FluxGet", "Use browser", []*widget.FormItem{widget.NewFormItem("Folder", folder), widget.NewFormItem("Filename", name), widget.NewFormItem("", sortFiles), widget.NewFormItem("", later)}, func(yes bool) {
 				if b.promptID == r.Key() {
 					b.promptID = ""
 				}
@@ -234,9 +240,9 @@ func (b *browserIntegration) handle(ctx context.Context, r browserbridge.Request
 					respond(browserbridge.Failure("Kept in the browser"))
 					return
 				}
-				begin(strings.TrimSpace(folder.Text), name.Text, later.Checked)
+				begin(strings.TrimSpace(folder.Text), name.Text, later.Checked, sortFiles.Checked)
 			}, v.window)
-			prompt.Resize(fyne.NewSize(580, 260))
+			prompt.Resize(fyne.NewSize(580, 310))
 			v.window.Show()
 			v.window.RequestFocus()
 			prompt.Show()

@@ -20,6 +20,7 @@ type queueEntry struct {
 	State           string               `json:"state"`
 	Destination     string               `json:"destination"`
 	AutomaticName   bool                 `json:"automatic_name,omitempty"`
+	SortFiles       bool                 `json:"sort_files,omitempty"`
 	ExpectedSHA256  string               `json:"expected_sha256,omitempty"`
 	Message         string               `json:"message,omitempty"`
 	Progress        string               `json:"progress,omitempty"`

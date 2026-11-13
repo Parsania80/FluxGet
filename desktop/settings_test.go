@@ -11,11 +11,15 @@ import (
 )
 
 func TestSpeedSettingsPersist(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	setTestConfig(t, t.TempDir())
 	s, err := loadSpeedSettings()
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !s.SortFiles {
+		t.Fatal("new settings do not enable file-type folders")
+	}
+	s.SortFiles = false
 	s.Enabled = true
 	s.Default = 512
 	s.MaxActive = 3
@@ -30,7 +34,7 @@ func TestSpeedSettingsPersist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.Enabled || got.Default != 512 || got.Overrides["queue:1"] != 128 || got.MaxActive != 3 || got.Connections != 2 || got.Overall != 2048 || got.DisplayUnit != "GB" {
+	if got.SortFiles || !got.Enabled || got.Default != 512 || got.Overrides["queue:1"] != 128 || got.MaxActive != 3 || got.Connections != 2 || got.Overall != 2048 || got.DisplayUnit != "GB" {
 		t.Fatalf("unexpected settings: %+v", got)
 	}
 }

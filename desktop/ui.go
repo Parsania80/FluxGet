@@ -290,6 +290,10 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 	v.youtube = newYouTubeView(w, settings, executable)
 	settingsPage := settings.page(w, func() {
 		v.refresh()
+		if !v.youtube.busy && !v.youtube.submitting {
+			v.youtube.sortFiles.SetChecked(settings.SortFiles)
+			v.youtube.playlist.sortFiles.SetChecked(settings.SortFiles)
+		}
 		v.youtube.proxyNote.SetText(proxyDefaultDescription(settings.Proxy))
 		if v.youtube.video.ID != "" {
 			v.youtube.selectionChanged()
@@ -792,11 +796,11 @@ func (v *downloadsView) finishClose() {
 }
 
 type downloadDraft struct {
-	Proxy                *networkproxy.Config
-	URL, Destination     string
-	AutomaticName, Later bool
-	TargetID             int
-	Replace              *replacement
+	Proxy                           *networkproxy.Config
+	URL, Destination                string
+	AutomaticName, SortFiles, Later bool
+	TargetID                        int
+	Replace                         *replacement
 }
 
 func (v *downloadsView) addDialog() {
@@ -807,6 +811,8 @@ func (v *downloadsView) addDialog() {
 	folder.SetPlaceHolder("Your Downloads folder")
 	name := widget.NewEntry()
 	name.SetPlaceHolder("Use the server’s filename")
+	sortFiles := widget.NewCheck("Sort into a file-type folder", nil)
+	sortFiles.SetChecked(v.settings.SortFiles)
 	useProxy := widget.NewCheck("Download with proxy", nil)
 	useProxy.SetChecked(v.settings.Proxy.Enabled)
 	proxyNote := widget.NewLabel(proxyDefaultDescription(v.settings.Proxy))
@@ -825,6 +831,7 @@ func (v *downloadsView) addDialog() {
 	var prompt dialog.Dialog
 	submit := func(later bool) {
 		raw, dir, filename := strings.TrimSpace(link.Text), strings.TrimSpace(folder.Text), strings.TrimSpace(name.Text)
+		sortByType := sortFiles.Checked
 		parsed, err := url.Parse(raw)
 		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.User != nil {
 			dialog.ShowInformation("Download link required", "Enter a public HTTP or HTTPS download link without credentials.", v.window)
@@ -838,7 +845,11 @@ func (v *downloadsView) addDialog() {
 		prompt.Hide()
 		var destination string
 		v.work(func(q *queueClient) (desktopResponse, error) {
-			output, err := platformcmd.Command(v.executable, append([]string{"-suggest-output"}, downloadArgs(raw, dir, filename)...)...).Output()
+			args := append([]string{"-suggest-output"}, downloadArgs(raw, dir, filename)...)
+			if sortByType {
+				args = append(args, "-sort-files")
+			}
+			output, err := platformcmd.Command(v.executable, args...).Output()
 			if err != nil {
 				return desktopResponse{}, fmt.Errorf("cannot choose the output path; check the filename and folder")
 			}
@@ -849,7 +860,7 @@ func (v *downloadsView) addDialog() {
 			destination = path
 			return callDesktop(q, desktopRequest{Operation: "snapshot"})
 		}, func(response desktopResponse) {
-			draft := downloadDraft{Proxy: route, URL: raw, Destination: destination, AutomaticName: filename == "", Later: later}
+			draft := downloadDraft{Proxy: route, URL: raw, Destination: destination, AutomaticName: filename == "", SortFiles: sortByType && filename == "", Later: later}
 			if _, err := os.Lstat(draft.Destination); err == nil {
 				v.duplicate(draft, draft.Destination)
 				return
@@ -866,7 +877,7 @@ func (v *downloadsView) addDialog() {
 	now := widget.NewButtonWithIcon("Download now", theme.DownloadIcon(), func() { submit(false) })
 	now.Importance = widget.HighImportance
 	later := widget.NewButton("Download later", func() { submit(true) })
-	form := container.NewVBox(note, useProxy, proxyNote, widget.NewForm(widget.NewFormItem("Download link", link), widget.NewFormItem("Folder", container.NewBorder(nil, nil, nil, browse, folder)), widget.NewFormItem("Filename", name)), container.NewHBox(now, later))
+	form := container.NewVBox(note, useProxy, proxyNote, widget.NewForm(widget.NewFormItem("Download link", link), widget.NewFormItem("Folder", container.NewBorder(nil, nil, nil, browse, folder)), widget.NewFormItem("Filename", name)), sortFiles, container.NewHBox(now, later))
 	prompt = dialog.NewCustom("Add download", "Cancel", form, v.window)
 	prompt.Resize(fyne.NewSize(620, 450))
 	prompt.Show()
@@ -877,7 +888,7 @@ func (v *downloadsView) enqueue(draft downloadDraft) {
 	if draft.Later || draft.Replace != nil {
 		state = "paused"
 	}
-	entry := queueEntry{Proxy: draft.Proxy, ID: draft.TargetID, URL: draft.URL, Destination: draft.Destination, AutomaticName: draft.AutomaticName, State: state}
+	entry := queueEntry{Proxy: draft.Proxy, ID: draft.TargetID, URL: draft.URL, Destination: draft.Destination, AutomaticName: draft.AutomaticName, SortFiles: draft.SortFiles, State: state}
 	operation := "add"
 	if draft.TargetID > 0 {
 		operation = "retarget"
@@ -962,6 +973,7 @@ func (v *downloadsView) duplicate(draft downloadDraft, path string) {
 		}
 		draft.Destination = copy
 		draft.AutomaticName = false
+		draft.SortFiles = false
 		draft.Replace = nil
 		v.enqueue(draft)
 	})
@@ -983,6 +995,7 @@ func (v *downloadsView) duplicate(draft downloadDraft, path string) {
 			}
 			draft.Destination = copy
 			draft.AutomaticName = false
+			draft.SortFiles = false
 			draft.Replace = original
 			v.enqueue(draft)
 		}, v.window)
