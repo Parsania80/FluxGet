@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/Parsania80/FluxGet/internal/buildinfo"
 	"github.com/Parsania80/FluxGet/internal/downloadcategory"
+	"github.com/Parsania80/FluxGet/media"
 	"github.com/Parsania80/FluxGet/networkproxy"
 	"io"
 	"net/http"
@@ -28,6 +29,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 	cancelOnClose := flags.Bool("cancel-on-stdin-close", false, "Cancel a desktop companion transfer when stdin closes")
 	version := flags.Bool("version", false, "Print FluxGet version")
+	setupMedia := flags.Bool("setup-media-tools", false, "Download and verify the pinned YouTube tools for this user")
 	proxyURL := flags.String("proxy", "", "Proxy URL for this transfer (HTTP, HTTPS or SOCKS5); empty selects Direct")
 	rawURL := flags.String("url", "", "Public HTTP or HTTPS file URL")
 	destination := flags.String("out", "", "Destination file (must not already exist)")
@@ -74,6 +76,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if proxyErr != nil {
 		fmt.Fprintln(stderr, proxyErr)
 		return 2
+	}
+	if *setupMedia {
+		if *queue || *list || *resume || *suggestOutput || *rawURL != "" || *destination != "" || *directory != "" || *name != "" || *sortFiles || flags.NArg() != 0 {
+			fmt.Fprintln(stderr, "Use -setup-media-tools alone, optionally with -proxy.")
+			return 2
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		manifest, err := media.SetupTools(ctx, proxy)
+		if err != nil {
+			fmt.Fprintln(stderr, "YouTube tool setup failed:", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "%q\n", manifest)
+		return 0
 	}
 	if *queue && proxy.Enabled {
 		fmt.Fprintln(stderr, "Choose a proxy per queue download in the desktop app; -proxy is for standalone transfers.")

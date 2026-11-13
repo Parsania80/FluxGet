@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-var ErrTools = errors.New("media tools are missing or invalid; use the stage-1 setup helper")
+var ErrTools = errors.New("media tools are missing or invalid; open YouTube → Media tools to set them up")
 
 type Tools struct {
 	YTDLP   string `json:"yt_dlp"`

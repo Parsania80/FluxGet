@@ -52,6 +52,46 @@ func youtubeTestView(t *testing.T) (*youtubeView, chan func()) {
 	return y, queue
 }
 
+func TestYouTubeToolSetupLifecycleAndCancellation(t *testing.T) {
+	y, queue := youtubeTestView(t)
+	previous := y.tools.Text
+	var captured networkproxy.Config
+	y.settings.Proxy = networkproxy.Config{Enabled: true, URL: "socks5://127.0.0.1:10808"}
+	y.useProxy.SetChecked(true)
+	manifest := filepath.Join(t.TempDir(), "tools.json")
+	calls := 0
+	y.setupTools = func(_ context.Context, route networkproxy.Config) (string, error) {
+		calls++
+		captured = route
+		return manifest, nil
+	}
+	y.installTools()
+	y.installTools()
+	finishPlaylist(t, y, queue)
+	if calls != 1 || y.tools.Text != manifest || !captured.Enabled || !strings.Contains(y.status.Text, "tools are ready") {
+		t.Fatal("setup did not snapshot proxy or publish manifest", calls, y.status.Text)
+	}
+	y.tools.SetText(previous)
+	y.setupTools = func(ctx context.Context, _ networkproxy.Config) (string, error) {
+		<-ctx.Done()
+		return manifest, ctx.Err()
+	}
+	y.installTools()
+	test.Tap(y.cancel)
+	finishPlaylist(t, y, queue)
+	if y.tools.Text != previous || !strings.Contains(y.status.Text, "canceled") {
+		t.Fatal("canceled setup changed tool selection", y.status.Text)
+	}
+	y.setupTools = func(context.Context, networkproxy.Config) (string, error) {
+		return "", errors.New("https://secret.invalid/?token=PRIVATE")
+	}
+	y.installTools()
+	finishPlaylist(t, y, queue)
+	if y.tools.Text != previous || strings.Contains(y.status.Text, "PRIVATE") || !strings.Contains(y.status.Text, "failed") {
+		t.Fatal("setup failure leaked details or changed manifest", y.status.Text)
+	}
+}
+
 func finishYouTubeAnalysis(t *testing.T, queue chan func()) {
 	t.Helper()
 	select {

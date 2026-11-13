@@ -13,7 +13,7 @@ import zipfile
 
 
 def setup(destination):
-    lock = json.loads(Path(__file__).with_name('media-tools.lock.json').read_text())
+    lock = json.loads((Path(__file__).resolve().parents[1] / 'media/tools.lock.json').read_text())
     system = platform.system().lower()
     if platform.machine().lower() not in ('amd64', 'x86_64'):
         raise ValueError('Only amd64 is pinned for this spike')

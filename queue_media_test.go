@@ -19,6 +19,22 @@ import (
 
 const mediaQueueFixture = `{"id":"AAAAAAAAAAA","title":"Queue media fixture","duration":3,"formats":[{"format_id":"137","ext":"mp4","vcodec":"avc1.640028","acodec":"none","height":1080,"protocol":"https","filesize":65536},{"format_id":"140","ext":"m4a","vcodec":"none","acodec":"mp4a.40.2","protocol":"https","filesize":65536}]}`
 
+func TestMediaToolSetupCLIRejectsDownloadCommands(t *testing.T) {
+	cache := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cache)
+	t.Setenv("LOCALAPPDATA", cache)
+	for _, args := range [][]string{{"-queue"}, {"-out", filepath.Join(cache, "file")}, {"-sort-files"}, {"-url", "https://example.com/file"}} {
+		var out, stderr bytes.Buffer
+		if code := run(append([]string{"-setup-media-tools"}, args...), &out, &stderr); code != 2 || !strings.Contains(stderr.String(), "alone") || out.Len() != 0 {
+			t.Fatal("setup accepted conflicting download options", args, code)
+		}
+	}
+	entries, err := os.ReadDir(cache)
+	if err != nil || len(entries) != 0 {
+		t.Fatal("rejected setup changed the cache", err)
+	}
+}
+
 // The test binary doubles as explicit tools; these branches never fetch a URL.
 func queueMediaTestTool() bool {
 	if len(os.Args) < 2 {

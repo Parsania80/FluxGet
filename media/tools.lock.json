@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "purpose": "Stage-1 development probes only; not included in FluxGet release installers",
+  "purpose": "Checksum-locked upstream downloads for explicit per-user setup; third-party executables are not redistributed in FluxGet installers",
   "versions": {
     "yt_dlp": "2026.10.26",
     "ejs": "0.8.0",

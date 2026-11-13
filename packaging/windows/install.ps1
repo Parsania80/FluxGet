@@ -11,7 +11,7 @@ $required = @('fluxget.exe','fluxget-gui.exe','fluxget-native-chrome.exe','fluxg
 foreach ($file in $required) { if (-not (Test-Path (Join-Path $source $file))) { throw "Missing release file: $file" } }
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 if ($source -ne $InstallDir) {
-    foreach ($file in ($required + @('README.md','LICENSE','RELEASE-NOTES.md','install.ps1','uninstall.ps1','Install.cmd'))) {
+    foreach ($file in ($required + @('README.md','LICENSE','RELEASE-NOTES.md','MEDIA-TOOLS-NOTICES.md','install.ps1','uninstall.ps1','Install.cmd'))) {
         Copy-Item (Join-Path $source $file) $InstallDir -Recurse -Force
     }
 }

@@ -49,6 +49,7 @@ type youtubeView struct {
 	cancelRun                                           context.CancelFunc
 	onIdle                                              func()
 	analyzer                                            youtubeAnalyzer
+	setupTools                                          func(context.Context, networkproxy.Config) (string, error)
 	dispatch                                            func(func())
 	submit                                              func(queueEntry, func(error))
 	canDownload                                         func() bool
@@ -77,7 +78,13 @@ func newYouTubeView(w fyne.Window, settings *speedSettings, executable string) *
 	manifest := os.Getenv("FLUXGET_MEDIA_TOOLS")
 	if manifest == "" {
 		manifest = filepath.Join(filepath.Dir(executable), "media-tools", "tools.json")
+		if _, err := os.Stat(manifest); err != nil {
+			if configured, err := media.DefaultToolsManifest(); err == nil {
+				manifest = configured
+			}
+		}
 	}
+	y.setupTools = media.SetupTools
 	y.tools.SetText(manifest)
 	y.browseTools = widget.NewButtonWithIcon("Choose…", theme.FolderOpenIcon(), func() {
 		d := dialog.NewFileOpen(func(file fyne.URIReadCloser, err error) {
@@ -181,11 +188,20 @@ func newYouTubeView(w fyne.Window, settings *speedSettings, executable string) *
 	y.filename.OnChanged = func(string) { y.updateDownloadEnabled() }
 	y.sortFiles.OnChanged = func(bool) { y.updateDownloadEnabled() }
 	toolsButton := widget.NewButtonWithIcon("Media tools", theme.SettingsIcon(), func() {
-		note := widget.NewLabel("The installed preview includes media tools. Change this only if you use a different tools.json manifest.")
+		note := widget.NewLabel("First use: set up the YouTube tools below. Internet access and about 700 MB of free space are required. Downloads come from the original yt-dlp, Deno and FFmpeg releases and are verified with SHA-256. Your selected proxy is used. No automatic updates.")
 		note.Wrapping = fyne.TextWrapWord
-		d := dialog.NewCustom("Media tools", "Done", container.NewVBox(note,
+		var d dialog.Dialog
+		setup := widget.NewButtonWithIcon("Set up YouTube tools", theme.DownloadIcon(), func() {
+			dialog.ShowConfirm("Download YouTube tools?", "Download the pinned yt-dlp, Deno and FFmpeg tools into your private user cache? Their separate licenses apply. Existing downloads and tools will be kept.", func(yes bool) {
+				if yes {
+					d.Hide()
+					y.installTools()
+				}
+			}, w)
+		})
+		d = dialog.NewCustom("Media tools", "Done", container.NewVBox(note, setup,
 			widget.NewForm(widget.NewFormItem("Manifest", container.NewBorder(nil, nil, nil, y.browseTools, y.tools)))), w)
-		d.Resize(fyne.NewSize(640, 230))
+		d.Resize(fyne.NewSize(640, 330))
 		d.Show()
 	})
 	toolsButton.Importance = widget.LowImportance
@@ -216,6 +232,55 @@ func newYouTubeView(w fyne.Window, settings *speedSettings, executable string) *
 		container.NewVBox(y.spinner, widget.NewSeparator(), y.status), nil, nil,
 		container.NewStack(y.empty, y.options, y.playlist.content)))
 	return y
+}
+
+func (y *youtubeView) installTools() {
+	if y.busy || y.closed || y.submitting {
+		return
+	}
+	route, err := proxyForDownload(y.settings.Proxy, y.useProxy.Checked)
+	if err != nil {
+		y.status.SetText(err.Error())
+		return
+	}
+	config := networkproxy.Config{}
+	if route != nil {
+		config = *route
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	y.cancelRun = cancel
+	y.setBusy(true)
+	y.status.SetText("Downloading and verifying YouTube tools… This can take several minutes. Cancel keeps existing tools and downloads.")
+	setup, dispatch := y.setupTools, y.dispatch
+	go func() {
+		manifest, err := setup(ctx, config)
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		cancel()
+		dispatch(func() {
+			y.cancelRun = nil
+			y.setBusy(false)
+			if y.closed {
+				if y.onIdle != nil {
+					done := y.onIdle
+					y.onIdle = nil
+					done()
+				}
+				return
+			}
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					y.status.SetText("YouTube tool setup canceled. Existing tools and downloads are kept.")
+				} else {
+					y.status.SetText("YouTube tool setup failed. Check the connection, proxy, free space and permissions, then retry.")
+				}
+				return
+			}
+			y.tools.SetText(manifest)
+			y.status.SetText("YouTube tools are ready. Paste a video or playlist link and choose Analyze.")
+		})
+	}()
 }
 
 func (y *youtubeView) invalidate() {
@@ -343,7 +408,7 @@ func youtubeAnalysisError(err error) string {
 	case errors.Is(err, context.DeadlineExceeded):
 		return "Analysis timed out. Check your connection or proxy and try again."
 	case errors.Is(err, media.ErrTools):
-		return "Media tools are missing or invalid. Open Media tools — development preview and choose the prepared tools.json manifest."
+		return "Media tools are missing or invalid. Open Media tools and select Set up YouTube tools, or choose an existing tools.json manifest."
 	case errors.Is(err, media.ErrMetadata):
 		return "This video has no supported public formats. Live, private and login-required sources are not supported."
 	default:
@@ -356,7 +421,7 @@ func (y *youtubeView) cancelAnalysis() {
 	if y.busy && y.cancelRun != nil {
 		y.cancelRun()
 		y.cancel.Disable()
-		y.status.SetText("Canceling analysis…")
+		y.status.SetText("Canceling…")
 	}
 }
 

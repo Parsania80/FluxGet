@@ -21,7 +21,7 @@ args.out = args.out.resolve()
 if args.bin_dir:
     args.bin_dir = args.bin_dir.resolve()
 if os.environ.get('GOARCH', 'amd64') != 'amd64':
-    p.error('Version 1 packages target amd64')
+    p.error('Release packages target amd64')
 args.out.mkdir(parents=True, exist_ok=True)
 name = f'fluxget-{VERSION}-{args.platform}-amd64'
 stage = args.out / 'stage' / name
@@ -52,6 +52,8 @@ else:
             resource.unlink(missing_ok=True)
 for browser in ('firefox', 'opera'):
     shutil.copy2(stage / ('fluxget-native-chrome' + exe), stage / ('fluxget-native-' + browser + exe))
+if subprocess.check_output([str(stage / ('fluxget' + exe)), '-version'], text=True).strip() != f'FluxGet {VERSION}':
+    raise SystemExit('Packaged engine and source versions differ')
 run([sys.executable, 'packaging/build_browser_extensions.py', '--out', str(stage / 'extensions')])
 for browser in ('chrome', 'firefox', 'opera'):
     manifest = json.loads((stage / f'extensions/{browser}/manifest.json').read_text())
@@ -67,6 +69,7 @@ for browser in ('chrome', 'firefox', 'opera'):
 for source in ('README.md', 'LICENSE'):
     shutil.copy2(ROOT / source, stage / source)
 shutil.copy2(ROOT / 'packaging/RELEASE-NOTES.md', stage / 'RELEASE-NOTES.md')
+shutil.copy2(ROOT / 'packaging/MEDIA-TOOLS-NOTICES.md', stage / 'MEDIA-TOOLS-NOTICES.md')
 shutil.copy2(ROOT / 'desktop/assets/fluxget.png', stage / 'fluxget.png')
 if exe:
     for source in ('install.ps1', 'uninstall.ps1', 'Install.cmd'):
