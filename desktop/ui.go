@@ -111,6 +111,8 @@ type downloadsView struct {
 	partDetails                                              *fyne.Container
 	status, summary                                          *widget.Label
 	selectionCount                                           *widget.Label
+	selectionHint, emptyTitle, emptyText                     *widget.Label
+	selectionActions                                         *fyne.Container
 	management                                               *budgetSnapshot
 	empty                                                    fyne.CanvasObject
 	add, pause, resume, retry, open, folder, more, reconnect *widget.Button
@@ -155,7 +157,7 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 		detail := widget.NewLabel("Status")
 		detail.Wrapping = fyne.TextWrapWord
 		controls := container.NewHBox(widget.NewLabelWithStyle("Speed: —", fyne.TextAlignTrailing, fyne.TextStyle{Bold: true}), widget.NewButton("Limit: default", nil), widget.NewButton("Remove limit", nil), widget.NewCheck("Select", nil), widget.NewButton("Direct", nil))
-		return container.NewVBox(container.NewBorder(nil, nil, nil, controls, name), detail, progressLine(), newSegmentPanel())
+		return container.NewVBox(container.NewVBox(name, controls), detail, progressLine(), newSegmentPanel())
 	}, func(id widget.ListItemID, object fyne.CanvasObject) {
 		rows := v.rows()
 		if id < 0 || id >= len(rows) {
@@ -235,6 +237,7 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 		showProgress(box.Objects[2].(*widget.ProgressBar), value, known)
 		key := row.Key
 		updateSegmentPanel(box.Objects[3].(*fyne.Container), j, func() { v.showParts(key) })
+		box.Refresh()
 	})
 	template := v.list.CreateItem().(*fyne.Container)
 	panel := template.Objects[3].(*fyne.Container)
@@ -266,20 +269,23 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 		v.refresh()
 	})
 	v.filters = categories
-	sidebar := container.NewPadded(container.NewVBox(widget.NewLabelWithStyle("DOWNLOADS", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), categories))
-	emptyTitle := widget.NewLabelWithStyle("Your downloads appear here", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
-	emptyText := widget.NewLabel("Add a download to begin. Extra files wait automatically.")
-	emptyText.Alignment = fyne.TextAlignCenter
-	emptyText.Wrapping = fyne.TextWrapWord
-	v.empty = container.NewCenter(container.NewVBox(emptyTitle, emptyText))
+	sidebar := container.NewPadded(container.NewVBox(widget.NewLabelWithStyle("Status", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), categories))
+	v.emptyTitle = widget.NewLabelWithStyle("Your downloads appear here", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
+	v.emptyText = widget.NewLabel("Add a file link to begin.\nExtra downloads wait automatically.")
+	v.emptyText.Alignment = fyne.TextAlignCenter
+	v.empty = container.NewCenter(container.NewVBox(
+		container.NewCenter(container.NewGridWrap(fyne.NewSize(40, 40), widget.NewIcon(theme.DownloadIcon()))), v.emptyTitle, v.emptyText))
 	stack := container.NewStack(v.empty, v.list)
 	split := container.NewHSplit(sidebar, container.NewPadded(stack))
 	split.Offset = 0.19
-	title := widget.NewLabelWithStyle("Downloads", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	toolbar := container.NewHBox(v.add, v.pause, v.resume, v.retry, v.open, v.folder, v.more)
-	selectionBar := container.NewHBox(v.selectAll, v.clearSelection, v.selectionCount, v.remove)
-	top := container.NewPadded(container.NewVBox(title, v.summary, v.managementNote, toolbar, selectionBar, widget.NewSeparator()))
-	downloads := container.NewBorder(top, nil, nil, nil, split)
+	title := widget.NewRichTextFromMarkdown("## Downloads")
+	v.selectionActions = container.NewHBox(v.pause, v.resume, v.retry, v.open, v.folder, v.more)
+	v.selectionHint = widget.NewLabel("Select a download to pause, resume, retry or open it.")
+	selectionBar := container.NewPadded(container.NewBorder(nil, nil, container.NewHBox(v.selectAll, v.clearSelection), v.remove, v.selectionCount))
+	top := container.NewPadded(container.NewVBox(
+		container.NewBorder(nil, nil, title, v.add, v.summary), v.managementNote,
+		container.NewStack(v.selectionHint, v.selectionActions), widget.NewSeparator()))
+	downloads := container.NewBorder(top, container.NewVBox(widget.NewSeparator(), selectionBar), nil, nil, split)
 	settings.applyDownloads = v.applySettings
 	v.youtube = newYouTubeView(w, settings, executable)
 	settingsPage := settings.page(w, func() {
@@ -288,10 +294,7 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 		if v.youtube.video.ID != "" {
 			v.youtube.selectionChanged()
 		}
-	}, func() bool { return v.ready && !v.busy && !v.closing })
-	if scroll, ok := settingsPage.(*container.Scroll); ok {
-		scroll.Content = container.NewVBox(scroll.Content, v.browsers.page())
-	}
+	}, func() bool { return v.ready && !v.busy && !v.closing }, v.browsers.page())
 	tabs := container.NewAppTabs(container.NewTabItemWithIcon("Downloads", theme.DownloadIcon(), downloads), container.NewTabItemWithIcon("YouTube", theme.MediaVideoIcon(), v.youtube.content), container.NewTabItemWithIcon("Settings", theme.SettingsIcon(), settingsPage))
 	v.youtube.canDownload = func() bool { return v.ready && !v.busy && !v.closing }
 	v.youtube.submit = func(entry queueEntry, finish func(error)) {
@@ -340,6 +343,13 @@ func (v *downloadsView) actions() {
 	v.add.Disable()
 	rows := v.selectedRows()
 	v.selectionCount.SetText(fmt.Sprintf("%d selected", len(rows)))
+	if len(rows) == 0 {
+		v.selectionActions.Hide()
+		v.selectionHint.Show()
+	} else {
+		v.selectionActions.Show()
+		v.selectionHint.Hide()
+	}
 	if v.ready && !v.busy && !v.closing {
 		v.add.Enable()
 	} else {
@@ -403,6 +413,12 @@ func (v *downloadsView) refresh() {
 	v.list.Refresh()
 	v.updatePartDetails()
 	if len(rows) == 0 {
+		v.emptyTitle.SetText("Your downloads appear here")
+		v.emptyText.SetText("Add a file link to begin.\nExtra downloads wait automatically.")
+		if v.category != "All downloads" {
+			v.emptyTitle.SetText("No downloads in this view")
+			v.emptyText.SetText("Choose another status or add a new download.")
+		}
 		v.list.Hide()
 		v.empty.Show()
 	} else {

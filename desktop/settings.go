@@ -14,6 +14,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -242,7 +243,7 @@ func (s *speedSettings) configuration() desktopRequest {
 	return desktopRequest{Operation: "configure", MaxActive: s.MaxActive, Connections: s.Connections, Management: &policy}
 }
 
-func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool) fyne.CanvasObject {
+func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool, browser fyne.CanvasObject) fyne.CanvasObject {
 	policy := s.requestPolicy()
 	mode := widget.NewSelect([]string{"Automatic", "Manual"}, nil)
 	if policy.Mode == "manual" {
@@ -253,7 +254,7 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool)
 	total, origin := widget.NewEntry(), widget.NewEntry()
 	total.SetText(fmt.Sprint(policy.Total))
 	origin.SetText(fmt.Sprint(policy.PerOrigin))
-	managementNote := widget.NewLabel("Automatic measures your downloads and tries one extra connection or file at a time. It keeps extra connections when they improve total speed, respects your speed limits, and lets active files finish when reducing simultaneous downloads. Manual uses your configured maximums. Saved part boundaries stay fixed. On Linux, sustained CPU or memory pressure holds new work and reduces connections gradually. Destination and checkpoint timings are measured separately. Missing hardware observations stay Unknown; other systems retain conservative request budgets.")
+	managementNote := widget.NewLabel("Automatic adjusts downloads and connections to observed speed and system load. Manual uses your chosen limits. Reducing a limit lets active transfers finish first.")
 	managementNote.Wrapping = fyne.TextWrapWord
 	mode.OnChanged = func(value string) {
 		if value == "Automatic" {
@@ -274,6 +275,14 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool)
 	enabled.SetChecked(s.Enabled)
 	value := widget.NewEntry()
 	value.SetText(limitText(s.Default, inputUnit))
+	enabled.OnChanged = func(checked bool) {
+		if checked {
+			value.Enable()
+		} else {
+			value.Disable()
+		}
+	}
+	enabled.OnChanged(enabled.Checked)
 	active := widget.NewEntry()
 	active.SetText(fmt.Sprint(s.MaxActive))
 	connections := widget.NewEntry()
@@ -283,7 +292,7 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool)
 	folder := widget.NewEntry()
 	folder.SetText(s.Folder)
 	folder.SetPlaceHolder("Your Downloads folder")
-	browse := widget.NewButton("Browse…", func() {
+	browse := widget.NewButtonWithIcon("Browse…", theme.FolderOpenIcon(), func() {
 		dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
 			if err != nil {
 				dialog.ShowError(err, w)
@@ -293,12 +302,13 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool)
 		}, w)
 	})
 	proxySection, proxyChoice := proxySettingsFields(s.Proxy)
-	result := widget.NewLabel("")
+	result := widget.NewLabel("Changes apply after Save settings.")
 	result.Wrapping = fyne.TextWrapWord
 	perDownload := widget.NewFormItem("Per download ("+inputUnit+"/s)", value)
 	allDownloads := widget.NewFormItem("All downloads ("+inputUnit+"/s)", overall)
 	limits := widget.NewForm(perDownload, allDownloads)
-	save := widget.NewButton("Save settings", func() {
+	var save *widget.Button
+	save = widget.NewButtonWithIcon("Save settings", theme.DocumentSaveIcon(), func() {
 		if canSave != nil && !canSave() {
 			result.SetText("Wait for downloads to finish loading before saving settings.")
 			return
@@ -356,6 +366,7 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool)
 		}
 		next.Enabled = enabled.Checked
 		finish := func(err error) {
+			save.Enable()
 			if err != nil {
 				result.SetText("Could not apply settings: " + err.Error())
 				return
@@ -367,12 +378,13 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool)
 			perDownload.Text = "Per download (" + inputUnit + "/s)"
 			allDownloads.Text = "All downloads (" + inputUnit + "/s)"
 			limits.Refresh()
-			result.SetText("Saved. Proxy defaults apply to new downloads; existing downloads keep their route. Worker, request and speed limits apply now.")
+			result.SetText("Saved. Limits apply now; proxy defaults affect new downloads.")
 			if onSaved != nil {
 				onSaved()
 			}
 		}
 		if s.applyDownloads != nil {
+			save.Disable()
 			result.SetText("Applying settings…")
 			s.applyDownloads(next, finish)
 		} else {
@@ -380,19 +392,37 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool)
 		}
 	})
 	save.Importance = widget.HighImportance
-	note := widget.NewLabel("Extra downloads wait automatically. Paused downloads stay paused until you resume them. A lower simultaneous limit lets current transfers finish before starting more.")
-	note.Wrapping = fyne.TextWrapWord
-	speedNote := widget.NewLabel("Use 0 for unlimited overall speed. The per-download ceiling and each row’s individual limit apply together; the lower ceiling wins.")
+	speedNote := widget.NewLabel("Use 0 for unlimited overall speed. Individual download limits still apply; the lowest limit wins.")
 	speedNote.Wrapping = fyne.TextWrapWord
-	unitNote := widget.NewLabel("Choose KB, MB, or GB for download sizes, speeds, and limits. MB is the default. Units use 1,000 KB per MB and 1,000 MB per GB; save to apply the change.")
+	unitNote := widget.NewLabel("Sizes and speeds use decimal units: 1,000 KB = 1 MB; 1,000 MB = 1 GB.")
 	unitNote.Wrapping = fyne.TextWrapWord
-	return container.NewVScroll(container.NewPadded(container.NewVBox(
-		widget.NewLabelWithStyle("Display", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), unitNote, widget.NewForm(widget.NewFormItem("Data unit", unit)), widget.NewSeparator(),
-		widget.NewLabelWithStyle("Downloads", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), note,
-		managementNote,
-		widget.NewAccordion(widget.NewAccordionItem("Customize download management", container.NewVBox(widget.NewForm(widget.NewFormItem("Mode", mode), widget.NewFormItem("Maximum simultaneous downloads", active), widget.NewFormItem("Maximum connections per download", connections), widget.NewFormItem("Maximum total connections", total), widget.NewFormItem("Maximum connections to one server", origin)), s.hardwareNote))),
-		widget.NewForm(widget.NewFormItem("Default folder", container.NewBorder(nil, nil, nil, browse, folder))),
-		widget.NewSeparator(), widget.NewLabelWithStyle("Speed limits", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), speedNote, enabled,
-		limits, widget.NewSeparator(), proxySection, save, result,
-	)))
+	general := container.NewVBox(
+		widget.NewCard("Files & display", "", container.NewVBox(widget.NewForm(
+			widget.NewFormItem("Default folder", container.NewBorder(nil, nil, nil, browse, folder)), widget.NewFormItem("Data unit", unit)), unitNote)),
+		widget.NewCard("Speed limits", "", container.NewVBox(enabled, limits, speedNote)))
+	connectionsPage := container.NewVBox(widget.NewCard("Download management", "", container.NewVBox(managementNote,
+		widget.NewForm(widget.NewFormItem("Mode", mode), widget.NewFormItem("Simultaneous downloads", active), widget.NewFormItem("Connections per download", connections)),
+		widget.NewAccordion(widget.NewAccordionItem("Advanced connection budgets", container.NewVBox(widget.NewForm(
+			widget.NewFormItem("Total connections", total), widget.NewFormItem("Connections to one server", origin)), s.hardwareNote))))))
+	sections := container.NewAppTabs(
+		container.NewTabItemWithIcon("General", theme.HomeIcon(), container.NewVScroll(container.NewPadded(general))),
+		container.NewTabItemWithIcon("Connections", theme.SettingsIcon(), container.NewVScroll(container.NewPadded(connectionsPage))),
+		container.NewTabItemWithIcon("Proxy", theme.ComputerIcon(), container.NewVScroll(container.NewPadded(proxySection))))
+	sections.SetTabLocation(container.TabLocationLeading)
+	footer := container.NewVBox(widget.NewSeparator(), container.NewBorder(nil, nil, nil, save, result))
+	header := container.NewHBox(widget.NewRichTextFromMarkdown("## Settings"), widget.NewLabel("Make FluxGet work your way."))
+	body := container.NewBorder(container.NewVBox(header, widget.NewSeparator()), footer, nil, nil, sections)
+	if browser != nil {
+		browserTab := container.NewTabItemWithIcon("Browser downloads", theme.SearchIcon(), browser)
+		sections.Append(browserTab)
+		sections.OnSelected = func(item *container.TabItem) {
+			if item == browserTab {
+				footer.Hide()
+			} else {
+				footer.Show()
+			}
+			body.Refresh()
+		}
+	}
+	return container.NewPadded(body)
 }

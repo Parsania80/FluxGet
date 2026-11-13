@@ -12,6 +12,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/Parsania80/FluxGet/media"
 	"github.com/Parsania80/FluxGet/networkproxy"
@@ -64,7 +65,7 @@ func TestYouTubePlaylistSelectionPagingAndLowerQualityConsent(t *testing.T) {
 	y.analyzer = playlistAnalyzer(&calls)
 	loadPlaylistFixture(t, y, queue)
 	p := y.playlist
-	if !p.content.Visible() || len(calls) != 0 || y.options.Visible() {
+	if !p.content.Visible() || len(calls) != 0 || y.options.Visible() || y.empty.Visible() || p.acceptLower.Visible() || p.bitratePanel.Visible() {
 		t.Fatal("enumeration loaded formats or single-video selection")
 	}
 	test.Tap(p.all)
@@ -84,7 +85,7 @@ func TestYouTubePlaylistSelectionPagingAndLowerQualityConsent(t *testing.T) {
 	if len(calls) != 3 || len(p.jobs) != 3 || p.selected[2].job == nil || !p.selected[2].lower || p.selected[4].job != nil {
 		t.Fatal("per-item resolution or skip state incorrect", calls)
 	}
-	if !p.download.Disabled() {
+	if !p.download.Disabled() || !p.acceptLower.Visible() {
 		t.Fatal("lower quality silently accepted")
 	}
 	test.Tap(p.acceptLower)
@@ -142,8 +143,12 @@ func TestYouTubePlaylistBatchLimitRowReuseAndPreferenceInvalidation(t *testing.T
 	}
 	p.jobs = []queueEntry{{}}
 	p.batch = strings.Repeat("a", 32)
+	choice := p.selected[2]
+	choice.note, choice.lower, choice.job = "Ready · old format", true, &media.Job{}
+	p.selected[2] = choice
+	p.acceptLower.Show()
 	p.format.SetSelected("MKV")
-	if len(p.jobs) != 0 || p.batch != "" {
+	if len(p.jobs) != 0 || p.batch != "" || p.selected[2].job != nil || p.selected[2].note != "" || p.acceptLower.Visible() || p.download.Text != "Download" {
 		t.Fatal("output edit kept stale prepared jobs")
 	}
 	y.scope.SetSelected("This video")
@@ -210,6 +215,12 @@ func TestYouTubePlaylistScreenshotAndDownloadsSummary(t *testing.T) {
 	if !strings.Contains(v.summary.Text, "2 completed · 1 failed/canceled · 3 pending · 4 skipped") {
 		t.Fatal(v.summary.Text)
 	}
+	v.ready = true
+	v.status.SetText("Downloads ready")
+	test.Tap(y.playlist.acceptLower)
+	if y.playlist.download.Disabled() || y.playlist.download.Text != "Download 2" {
+		t.Fatal("ready download count does not match the prepared videos")
+	}
 	var tabs *container.AppTabs
 	var walk func(fyne.CanvasObject)
 	walk = func(o fyne.CanvasObject) {
@@ -228,27 +239,58 @@ func TestYouTubePlaylistScreenshotAndDownloadsSummary(t *testing.T) {
 	}
 	y.window.SetContent(v.content)
 	tabs.SelectIndex(1)
-	if path := os.Getenv("FLUXGET_PLAYLIST_SCREENSHOT"); path != "" {
-		f, err := os.Create(path)
-		if err != nil {
-			t.Fatal(err)
+	for _, screen := range []struct {
+		name  string
+		size  fyne.Size
+		theme fyne.Theme
+	}{
+		{"dark", fyne.NewSize(1100, 720), theme.DarkTheme()},
+		{"small", fyne.NewSize(900, 600), theme.DarkTheme()},
+		{"light", fyne.NewSize(1100, 720), theme.LightTheme()},
+		{"wide", fyne.NewSize(1440, 900), theme.DarkTheme()},
+	} {
+		fyne.CurrentApp().Settings().SetTheme(fluxTheme{screen.theme})
+		y.window.Resize(screen.size)
+		assertControlsVisible(t, y.window, y.playlist.download, y.playlist.prepare, y.playlist.acceptLower, y.playlist.previous, y.playlist.next)
+		if y.playlist.list.Size().Height < 100 {
+			t.Fatalf("%s: playlist has no usable scrolling area: %v", screen.name, y.playlist.list.Size())
 		}
-		err = png.Encode(f, y.window.Canvas().Capture())
-		f.Close()
-		if err != nil {
-			t.Fatal(err)
+		if path := os.Getenv("FLUXGET_PLAYLIST_SCREENSHOT"); path != "" {
+			f, err := os.Create(strings.TrimSuffix(path, ".png") + "-" + screen.name + ".png")
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = png.Encode(f, y.window.Canvas().Capture())
+			f.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
 		}
+	}
+}
 
-		y.content.(*container.Scroll).ScrollToBottom()
-		bottom, err := os.Create(strings.TrimSuffix(path, ".png") + "-bottom.png")
-		if err != nil {
-			t.Fatal(err)
-		}
-		err = png.Encode(bottom, y.window.Canvas().Capture())
-		bottom.Close()
-		if err != nil {
-			t.Fatal(err)
-		}
+func TestYouTubePlaylistShowsOnlyRelevantOutputSettings(t *testing.T) {
+	y, queue := youtubeTestView(t)
+	loadPlaylistFixture(t, y, queue)
+	p := y.playlist
+	p.kind.SetSelected("Audio only")
+	if p.qualityPanel.Visible() || p.bitratePanel.Visible() {
+		t.Fatal("video quality or MP3 bitrate shown for M4A")
+	}
+	p.format.SetSelected("MP3")
+	if !p.bitratePanel.Visible() || p.bitrate.Disabled() {
+		t.Fatal("MP3 bitrate is unavailable")
+	}
+	p.kind.SetSelected("Video")
+	if !p.qualityPanel.Visible() || p.bitratePanel.Visible() || p.quality.Disabled() {
+		t.Fatal("video preferences did not restore")
+	}
+	p.acceptLower.Show()
+	p.acceptLower.SetChecked(true)
+	p.estimate.SetText("Old format review")
+	y.link.SetText("https://youtu.be/AAAAAAAAAAA")
+	if !y.empty.Visible() || p.content.Visible() || y.options.Visible() || p.acceptLower.Visible() || p.acceptLower.Checked || p.estimate.Text != "Select videos, then load formats." {
+		t.Fatal("changing source left stale results visible")
 	}
 }
 

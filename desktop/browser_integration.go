@@ -83,7 +83,8 @@ func (b *browserIntegration) page() fyne.CanvasObject {
 			result.SetText("Saved. Changes apply to new handoffs. Existing FluxGet downloads continue.")
 		}
 	})
-	explain := widget.NewLabel("Use the extension to grant site access for automatic capture. Public GET downloads are supported; logins, POST, private browsing, query links and uncertain requests stay in the browser. Firefox Snap and Opera need separate native-host verification.")
+	save.Importance = widget.HighImportance
+	explain := widget.NewLabel("Grant site access in the extension to capture public downloads. Logins, POST requests, private browsing and uncertain requests stay in your browser. Firefox Snap and Opera still need native verification.")
 	explain.Wrapping = fyne.TextWrapWord
 	profiles := widget.NewLabel("")
 	profiles.Wrapping = fyne.TextWrapWord
@@ -121,7 +122,15 @@ func (b *browserIntegration) page() fyne.CanvasObject {
 			refresh()
 		}, b.view.window)
 	})
-	return container.NewVBox(title, explain, b.note, master, container.NewHBox(browsers["chrome"], browsers["firefox"], browsers["opera"]), widget.NewForm(widget.NewFormItem("Capture mode", mode), widget.NewFormItem("Excluded hosts", exclusions)), container.NewHBox(save, setup, widget.NewButton("Refresh profiles", refresh), reset), profiles, result)
+	reset.Importance = widget.LowImportance
+	options := widget.NewCard("Browser downloads", "", container.NewVBox(explain, master,
+		container.NewHBox(browsers["chrome"], browsers["firefox"], browsers["opera"]),
+		widget.NewForm(widget.NewFormItem("Capture mode", mode), widget.NewFormItem("Excluded hosts", exclusions))))
+	connection := widget.NewCard("Connected profiles", "", container.NewVBox(b.note, profiles,
+		container.NewGridWithColumns(2, setup, widget.NewButton("Refresh profiles", refresh)), reset))
+	return container.NewBorder(nil,
+		container.NewVBox(widget.NewSeparator(), container.NewBorder(nil, nil, nil, save, result)), nil, nil,
+		container.NewVScroll(container.NewPadded(container.NewVBox(options, connection))))
 }
 func (b *browserIntegration) handle(ctx context.Context, r browserbridge.Request) browserbridge.Response {
 	if b.store == nil {

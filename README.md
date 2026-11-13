@@ -54,7 +54,9 @@ Keep `fluxget` and `fluxget-gui` together in the same folder.
 
 Extra downloads wait for a free slot. After reopening FluxGet, unfinished downloads stay paused until you resume them.
 
-Use **Settings** to change the download folder, speed limits, or display units. Sizes and speeds use **MB** by default; you can choose **KB**, **MB**, or **GB**. Open **Customize download management** to set the maximum downloads and connections, or switch to Manual.
+Use **Settings → General** for the download folder, display units and speed limits. Sizes and speeds use **MB** by default; you can choose **KB**, **MB**, or **GB**. Open **Settings → Connections** to set download/connection limits or switch between Automatic and Manual; advanced connection budgets stay collapsed. **Save settings** stays visible while you scroll. The locally installed preview includes the refreshed Downloads and Settings screens. Browser integration has its own **Browser downloads** section and **Save browser settings** button.
+
+Select a row to show its actions, or use checkboxes for a group. The bottom bar keeps selection and removal controls visible. Filenames have their own line above speed and route controls.
 
 Removing an item from the list keeps its files. Deleting files is a separate action that requires confirmation.
 
@@ -74,11 +76,13 @@ Available in development builds; not included in v1.0.0.
 
 Open **YouTube**, paste a public video or Shorts link, and choose **Analyze**. You can cancel analysis or use your configured proxy. Choose **Video** or **Audio only**, an available format and quality, then a folder and filename. Click **Download** to start it in the Downloads list. Use the usual pause, resume and speed controls there. Unfinished jobs reopen paused; damaged or unverified saved media may require **Restart media from beginning**. The locally installed Linux preview also supports selecting playlist entries; the normal-playlist preview was approved by the operator on 2026-11-13.
 
-The locally installed preview includes the prepared media tools beside the app. Other development builds need these tools configured. If they are not configured, expand **Media tools — development preview** and choose their `tools.json` manifest. See the [development setup and roadmap](project.md#youtube-videos-and-playlists--next-release-plan). A full public audio-to-MP3 download passed on Linux. Native Windows media execution and public video/merge checks remain pending.
+The locally installed preview includes the prepared media tools beside the app. Other development builds need these tools configured. If they are not configured, open **Media tools** and choose their `tools.json` manifest. See the [development setup and roadmap](project.md#youtube-videos-and-playlists--next-release-plan). A full public audio-to-MP3 download passed on Linux. Native Windows media execution and public video/merge checks remain pending.
 
 The installed Linux single-video preview was approved by the operator on 2026-11-13; its hands-on preview review is done. Remaining acceptance work includes public video/audio merging, native Windows media checks and broader recovery testing; normal-playlist selection is installed locally and was approved by the operator on 2026-11-13. Public metadata extraction passed for a four-entry playlist; full public playlist transfers remain unverified.
 
 The local Linux preview was refreshed with stage-4 playlist selection on 2026-11-13, including matching engine/desktop binaries and the existing pinned media tools. Installed-engine tests passed playlist admission, crash/reopen replay, MP4 merging and MP3 conversion with temporary local fixtures.
+
+The refreshed YouTube workspace is installed locally. It keeps the video list beside output settings, with Download always visible. Use **Browse** to choose a playlist destination. MP3 bitrate and lower-quality approval appear when needed; changing output settings clears the previous format review. **Connection** shows the configured source route.
 
 For playlists in the installed Linux preview, choose **Choose from playlist**, then **Analyze**. Select entries across pages, choose your preferred output and folder, then **Load selected formats**. Review skipped items and approve any lower qualities before clicking **Download**. Each video appears separately in Downloads; retry only failed items. Pages contain 100 entries, with up to 1,000 selected per batch. Existing files are kept, and larger metadata or a full queue can require a smaller batch.
 

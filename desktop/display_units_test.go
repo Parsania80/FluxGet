@@ -118,13 +118,19 @@ func TestSettingsUnitSelectorPersistsWithoutChangingLimits(t *testing.T) {
 	s.Enabled = true
 	s.Overrides["queue:1"] = 128
 	saved := 0
-	page := s.page(w, func() { saved++ }, func() bool { return true })
+	page := s.page(w, func() { saved++ }, func() bool { return true }, nil)
 	w.SetContent(page)
 	var selectUnit *widget.Select
 	var save *widget.Button
 	var walk func(fyne.CanvasObject)
 	walk = func(object fyne.CanvasObject) {
 		switch o := object.(type) {
+		case *container.AppTabs:
+			for _, item := range o.Items {
+				walk(item.Content)
+			}
+		case *widget.Card:
+			walk(o.Content)
 		case *container.Scroll:
 			walk(o.Content)
 		case *fyne.Container:
@@ -136,7 +142,9 @@ func TestSettingsUnitSelectorPersistsWithoutChangingLimits(t *testing.T) {
 				walk(item.Widget)
 			}
 		case *widget.Select:
-			selectUnit = o
+			if len(o.Options) == 3 && o.Options[0] == "KB" {
+				selectUnit = o
+			}
 		case *widget.Button:
 			if o.Text == "Save settings" {
 				save = o

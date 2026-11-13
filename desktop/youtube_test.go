@@ -314,6 +314,10 @@ func TestYouTubeTabAndSelectionScreenshot(t *testing.T) {
 	if tabs.Selected().Text != "YouTube" {
 		t.Fatal("YouTube page unavailable")
 	}
+	for _, size := range []fyne.Size{fyne.NewSize(900, 600), fyne.NewSize(1100, 720)} {
+		y.window.Resize(size)
+		assertControlsVisible(t, y.window, y.download, y.analyze)
+	}
 	if path := os.Getenv("FLUXGET_YOUTUBE_SCREENSHOT"); path != "" {
 		file, err := os.Create(path)
 		if err != nil {
@@ -323,6 +327,36 @@ func TestYouTubeTabAndSelectionScreenshot(t *testing.T) {
 		file.Close()
 		if err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+func TestYouTubeEmptyWorkspaceScreenshot(t *testing.T) {
+	y, _ := youtubeTestView(t)
+	if !y.empty.Visible() || y.options.Visible() || y.playlist.content.Visible() {
+		t.Fatal("new workspace shows stale results")
+	}
+	if path := os.Getenv("FLUXGET_YOUTUBE_SCREENSHOT"); path != "" {
+		file, err := os.Create(strings.TrimSuffix(path, ".png") + "-empty.png")
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = png.Encode(file, y.window.Canvas().Capture())
+		file.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func assertControlsVisible(t *testing.T, window fyne.Window, objects ...fyne.CanvasObject) {
+	t.Helper()
+	viewport := window.Canvas().Size()
+	for _, object := range objects {
+		pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(object)
+		size := object.Size()
+		if !object.Visible() || size.Width <= 0 || size.Height <= 0 || pos.X < 0 || pos.Y < 0 || pos.X+size.Width > viewport.Width || pos.Y+size.Height > viewport.Height {
+			t.Fatalf("control %T at %v size %v is outside viewport %v", object, pos, size, viewport)
 		}
 	}
 }

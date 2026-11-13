@@ -33,7 +33,7 @@ func proxySettingsFields(current networkproxy.Config) (fyne.CanvasObject, func(n
 	address := widget.NewEntry()
 	address.SetText(current.URL)
 	address.SetPlaceHolder("socks5://127.0.0.1:10808 or http://127.0.0.1:10809")
-	note := widget.NewLabel("Enter the HTTP, HTTPS or SOCKS5 listening address from your proxy app, such as v2ray. Keep that app running. You can choose Proxy or Direct for each download. Existing downloads keep their saved route; pause one before changing it. This field accepts a proxy address without a username or password, not a vmess/vless or subscription link.")
+	note := widget.NewLabel("Use the HTTP, HTTPS or SOCKS5 listening address from your proxy app and keep that app running. Credentials and subscription links are not supported. Existing downloads keep their route; pause one before changing Proxy or Direct.")
 	note.Wrapping = fyne.TextWrapWord
 	fields := container.NewVBox(widget.NewLabelWithStyle("Proxy", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), note, enabled, widget.NewForm(widget.NewFormItem("Proxy address", address)))
 	read := func(saved networkproxy.Config) (networkproxy.Config, error) {

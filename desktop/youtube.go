@@ -39,6 +39,7 @@ type youtubeView struct {
 	analyze, cancel, browseTools, download              *widget.Button
 	spinner                                             *widget.ProgressBarInfinite
 	options                                             *fyne.Container
+	empty                                               *fyne.Container
 	bitratePanel                                        *widget.Form
 	video                                               media.Video
 	videos, audios                                      []media.Format
@@ -96,11 +97,11 @@ func newYouTubeView(w fyne.Window, settings *speedSettings, executable string) *
 		d.SetFilter(storage.NewExtensionFileFilter([]string{".json"}))
 		d.Show()
 	})
-	y.status = widget.NewLabel("Paste a single-video or Shorts link, then choose Analyze.")
+	y.status = widget.NewLabel("Ready. Analyze a link to choose what to download.")
 	y.status.Wrapping = fyne.TextWrapWord
 	y.proxyNote = widget.NewLabel(proxyDefaultDescription(settings.Proxy))
 	y.proxyNote.Wrapping = fyne.TextWrapWord
-	y.useProxy = widget.NewCheck("Use proxy for this source", nil)
+	y.useProxy = widget.NewCheck("Use proxy", nil)
 	y.useProxy.SetChecked(settings.Proxy.Enabled)
 	y.title = widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	y.title.Wrapping = fyne.TextWrapWord
@@ -143,8 +144,12 @@ func newYouTubeView(w fyne.Window, settings *speedSettings, executable string) *
 	y.bitratePanel = widget.NewForm(widget.NewFormItem("MP3 bitrate", y.bitrate))
 	y.bitratePanel.Hide()
 	output := container.NewVBox(widget.NewForm(widget.NewFormItem("Save as", y.kind), widget.NewFormItem("Format", y.format), widget.NewFormItem("Video quality", y.quality), widget.NewFormItem("Audio track", y.audio)), y.bitratePanel)
-	destination := container.NewVBox(widget.NewForm(widget.NewFormItem("Folder", container.NewBorder(nil, nil, nil, browseFolder, y.folder)), widget.NewFormItem("Filename", y.filename)), widget.NewLabel("The selected format's extension is added automatically."), y.size, y.download)
-	y.options = container.NewVBox(y.title, y.details, container.NewGridWithColumns(2, widget.NewCard("Output", "", output), widget.NewCard("Destination", "", destination)), y.formatNote)
+	fileNote := widget.NewLabel("The file extension is added automatically. Existing files are kept.")
+	fileNote.Wrapping = fyne.TextWrapWord
+	destination := container.NewVBox(widget.NewForm(widget.NewFormItem("Folder", container.NewBorder(nil, nil, nil, browseFolder, y.folder)), widget.NewFormItem("Filename", y.filename)), fileNote)
+	y.options = container.NewBorder(container.NewVBox(y.title, y.details),
+		container.NewVBox(y.formatNote, widget.NewSeparator(), container.NewBorder(nil, nil, nil, y.download, y.size)), nil, nil,
+		container.NewVScroll(container.NewGridWithColumns(2, widget.NewCard("Output", "Choose the format and quality", output), widget.NewCard("Save to", "Choose where to keep your file", destination))))
 	y.options.Hide()
 	y.spinner = widget.NewProgressBarInfinite()
 	y.spinner.Stop()
@@ -171,19 +176,41 @@ func newYouTubeView(w fyne.Window, settings *speedSettings, executable string) *
 	y.bitrate.OnChanged = func(string) { y.selectionChanged() }
 	y.folder.OnChanged = func(string) { y.updateDownloadEnabled() }
 	y.filename.OnChanged = func(string) { y.updateDownloadEnabled() }
-	intro := widget.NewLabel("Explore video and audio formats from a public YouTube link. Analyze reads information without downloading media.")
-	intro.Wrapping = fyne.TextWrapWord
-	preview := widget.NewLabel("Choose one video or selected playlist entries. Analysis does not start downloads.")
-	preview.Wrapping = fyne.TextWrapWord
-	toolNote := widget.NewLabel("This development preview needs the prepared media tools. Choose their tools.json manifest if they are not beside the app. Tool installation will be included in a later release.")
-	toolNote.Wrapping = fyne.TextWrapWord
-	advanced := widget.NewAccordion(widget.NewAccordionItem("Media tools — development preview", container.NewVBox(toolNote, widget.NewForm(widget.NewFormItem("Tools manifest", container.NewBorder(nil, nil, nil, y.browseTools, y.tools))))))
-	y.scope = widget.NewSelect([]string{"This video", "Choose from playlist"}, func(string) { y.invalidate() })
+	toolsButton := widget.NewButtonWithIcon("Media tools", theme.SettingsIcon(), func() {
+		note := widget.NewLabel("The installed preview includes media tools. Change this only if you use a different tools.json manifest.")
+		note.Wrapping = fyne.TextWrapWord
+		d := dialog.NewCustom("Media tools", "Done", container.NewVBox(note,
+			widget.NewForm(widget.NewFormItem("Manifest", container.NewBorder(nil, nil, nil, y.browseTools, y.tools)))), w)
+		d.Resize(fyne.NewSize(640, 230))
+		d.Show()
+	})
+	toolsButton.Importance = widget.LowImportance
+	y.scope = widget.NewSelect([]string{"This video", "Choose from playlist"}, nil)
+	y.scope.PlaceHolder = "Choose from playlist"
 	y.scope.SetSelected("This video")
+	y.scope.OnChanged = func(string) { y.invalidate() }
 	y.playlist = newYouTubePlaylist(y)
 	y.playlistLoader = loadYouTubePlaylist
-	y.content = container.NewVScroll(container.NewPadded(container.NewVBox(intro, preview,
-		container.NewBorder(nil, nil, nil, container.NewHBox(y.analyze, y.cancel), y.link), widget.NewForm(widget.NewFormItem("Source selection", y.scope)), container.NewBorder(nil, nil, y.useProxy, nil, y.proxyNote), advanced, y.spinner, y.status, y.options, y.playlist.content)))
+	connection := widget.NewButtonWithIcon("Connection", theme.InfoIcon(), func() {
+		dialog.ShowInformation("Source connection", y.proxyNote.Text, w)
+	})
+	connection.Importance = widget.LowImportance
+	heading := widget.NewRichTextFromMarkdown("## YouTube")
+	subtitle := widget.NewLabel("Save videos, audio or a selection from a playlist.")
+	header := container.NewBorder(nil, nil, nil, toolsButton, container.NewHBox(heading, subtitle))
+	source := container.NewVBox(
+		container.NewBorder(nil, nil, widget.NewLabel("Link"), container.NewHBox(y.analyze, y.cancel), y.link),
+		container.NewHBox(widget.NewLabel("Import"), y.scope, y.useProxy, connection))
+	emptyTitle := widget.NewLabelWithStyle("Start with a YouTube link", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
+	emptyNote := widget.NewLabel("Paste a public video or playlist link above.\nAnalyze first, then choose what to download.")
+	emptyNote.Alignment = fyne.TextAlignCenter
+	y.empty = container.NewCenter(container.NewVBox(
+		container.NewCenter(container.NewGridWrap(fyne.NewSize(40, 40), widget.NewIcon(theme.MediaVideoIcon()))),
+		emptyTitle, emptyNote))
+	y.content = container.NewPadded(container.NewBorder(
+		container.NewVBox(header, source, widget.NewSeparator()),
+		container.NewVBox(y.spinner, widget.NewSeparator(), y.status), nil, nil,
+		container.NewStack(y.empty, y.options, y.playlist.content)))
 	return y
 }
 
@@ -199,6 +226,7 @@ func (y *youtubeView) invalidate() {
 		y.playlist.reset()
 	}
 	y.options.Hide()
+	y.empty.Show()
 	y.updateDownloadEnabled()
 }
 
@@ -256,7 +284,7 @@ func (y *youtubeView) startAnalysis() {
 	}
 	manifest := strings.TrimSpace(y.tools.Text)
 	if !filepath.IsAbs(manifest) {
-		y.status.SetText("Open Media tools — development preview and choose an absolute tools.json path.")
+		y.status.SetText("Open Media tools and choose an absolute tools.json path.")
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -294,6 +322,7 @@ func (y *youtubeView) startAnalysis() {
 			y.details.SetText(fmt.Sprintf("Duration: %s · Video ID: %s", (time.Duration(video.Duration) * time.Second).String(), video.ID))
 			y.filename.SetText(youtubeFilename(video.Title, video.ID))
 			y.populateContainers()
+			y.empty.Hide()
 			y.options.Show()
 			y.status.SetText("Video information loaded. Choose your output, then Download.")
 			if u, _ := url.Parse(y.link.Text); u != nil && u.Query().Get("list") != "" {

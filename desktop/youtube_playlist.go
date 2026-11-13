@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"image/color"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -14,8 +13,9 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/Parsania80/FluxGet/media"
 	"github.com/Parsania80/FluxGet/networkproxy"
@@ -39,6 +39,8 @@ type youtubePlaylist struct {
 	kind, format, quality, bitrate                *widget.Select
 	folder                                        *widget.Entry
 	acceptLower                                   *widget.Check
+	qualityPanel, bitratePanel                    *fyne.Container
+	browse                                        *widget.Button
 	jobs                                          []queueEntry
 	batch                                         string
 }
@@ -60,13 +62,13 @@ func loadYouTubePlaylist(ctx context.Context, manifest string, route networkprox
 
 func newYouTubePlaylist(y *youtubeView) *youtubePlaylist {
 	p := &youtubePlaylist{owner: y, selected: map[int]playlistChoice{}}
-	p.heading = widget.NewLabel("")
-	p.heading.Wrapping = fyne.TextWrapWord
+	p.heading = widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	p.heading.Truncation = fyne.TextTruncateEllipsis
 	p.count = widget.NewLabel("Select entries, then load their formats.")
-	p.estimate = widget.NewLabel("Disk requirements: Unknown. Merging may need additional temporary space.")
+	p.estimate = widget.NewLabel("Select videos, then load formats.")
 	p.estimate.Wrapping = fyne.TextWrapWord
-	p.previous = widget.NewButton("Previous page", func() { p.load(p.page.First - media.PlaylistPageSize) })
-	p.next = widget.NewButton("Next page", func() { p.load(p.page.First + media.PlaylistPageSize) })
+	p.previous = widget.NewButtonWithIcon("Previous", theme.NavigateBackIcon(), func() { p.load(p.page.First - media.PlaylistPageSize) })
+	p.next = widget.NewButtonWithIcon("Next", theme.NavigateNextIcon(), func() { p.load(p.page.First + media.PlaylistPageSize) })
 	p.all = widget.NewButton("Select this page", func() {
 		if y.busy {
 			return
@@ -78,7 +80,7 @@ func newYouTubePlaylist(y *youtubeView) *youtubePlaylist {
 		}
 		p.list.Refresh()
 	})
-	p.clear = widget.NewButton("Clear selection", func() {
+	p.clear = widget.NewButton("Clear", func() {
 		if !y.busy {
 			p.selected = map[int]playlistChoice{}
 			p.invalidate()
@@ -106,7 +108,10 @@ func newYouTubePlaylist(y *youtubeView) *youtubePlaylist {
 		title.SetText(entry.Title)
 		check.SetChecked(selected)
 		check.Enable()
-		note.SetText("Formats are loaded only when selected.")
+		note.SetText("Select to include in this download.")
+		if selected {
+			note.SetText("Selected · Formats not loaded")
+		}
 		if selected && choice.note != "" {
 			note.SetText(choice.note)
 		}
@@ -118,6 +123,7 @@ func newYouTubePlaylist(y *youtubeView) *youtubePlaylist {
 			check.Disable()
 		}
 		check.OnChanged = func(value bool) { p.choose(entry, value) }
+		row.Refresh()
 	})
 	p.kind = widget.NewSelect([]string{"Video", "Audio only"}, nil)
 	p.kind.SetSelected("Video")
@@ -136,32 +142,62 @@ func newYouTubePlaylist(y *youtubeView) *youtubePlaylist {
 		if value == "Audio only" {
 			p.format.SetOptions([]string{"M4A", "Opus", "MP3"})
 			p.quality.Disable()
+			p.qualityPanel.Hide()
 		} else {
 			p.format.SetOptions([]string{"MP4", "WebM", "MKV"})
 			p.quality.Enable()
+			p.qualityPanel.Show()
 		}
 		p.format.SetSelectedIndex(0)
 		p.invalidate()
 	}
 	p.format.OnChanged = func(string) {
 		p.bitrate.Disable()
+		p.bitratePanel.Hide()
 		if p.format.Selected == "MP3" {
 			p.bitrate.Enable()
+			p.bitratePanel.Show()
 		}
 		p.invalidate()
 	}
 	p.quality.OnChanged = func(string) { p.invalidate() }
 	p.bitrate.OnChanged = func(string) { p.invalidate() }
-	p.acceptLower = widget.NewCheck("Accept the lower qualities shown for selected entries", func(bool) { p.updateDownload() })
-	p.prepare = widget.NewButton("Load selected formats", p.resolve)
-	p.download = widget.NewButton("Download", p.submit)
+	p.acceptLower = widget.NewCheck("Accept lower qualities", func(bool) { p.updateDownload() })
+	p.acceptLower.Hide()
+	p.prepare = widget.NewButtonWithIcon("Load selected formats", theme.ViewRefreshIcon(), p.resolve)
+	p.download = widget.NewButtonWithIcon("Download", theme.DownloadIcon(), p.submit)
 	p.download.Importance = widget.HighImportance
 	p.download.Disable()
-	space := canvas.NewRectangle(color.Transparent)
-	space.SetMinSize(fyne.NewSize(0, 240))
-	p.content = container.NewVBox(p.heading, container.NewHBox(p.previous, p.next, p.all, p.clear), p.count, container.NewStack(space, p.list),
-		widget.NewForm(widget.NewFormItem("Save as", p.kind), widget.NewFormItem("Format", p.format), widget.NewFormItem("Maximum quality", p.quality), widget.NewFormItem("MP3 bitrate", p.bitrate), widget.NewFormItem("Destination folder", p.folder)),
-		widget.NewLabel("Files use playlist order, title and video ID. Existing files are kept."), p.prepare, p.estimate, p.acceptLower, p.download)
+	p.qualityPanel = container.NewVBox(widget.NewLabel("Maximum quality"), p.quality)
+	p.bitratePanel = container.NewVBox(widget.NewLabel("MP3 bitrate"), p.bitrate)
+	p.bitratePanel.Hide()
+	p.browse = widget.NewButtonWithIcon("Browse", theme.FolderOpenIcon(), func() {
+		dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
+			if y.closed {
+				return
+			}
+			if err != nil {
+				y.status.SetText("Could not open the destination folder.")
+			} else if uri != nil {
+				p.folder.SetText(uri.Path())
+			}
+		}, y.window)
+	})
+	fileNote := widget.NewLabel("Named by playlist order and title. Existing files are kept.")
+	fileNote.Wrapping = fyne.TextWrapWord
+	settings := container.NewVBox(
+		container.NewGridWithColumns(2, container.NewVBox(widget.NewLabel("Save as"), p.kind), container.NewVBox(widget.NewLabel("Format"), p.format)),
+		p.qualityPanel, p.bitratePanel, widget.NewLabel("Save to"),
+		container.NewBorder(nil, nil, nil, p.browse, p.folder), fileNote)
+	sidebar := widget.NewCard("Download settings", "", container.NewVScroll(settings))
+	entries := widget.NewCard("", "", container.NewBorder(
+		container.NewVBox(p.heading, container.NewBorder(nil, nil, nil, container.NewHBox(p.all, p.clear), p.count)),
+		container.NewBorder(nil, nil, p.previous, p.next, nil), nil, nil, p.list))
+	workspace := container.NewHSplit(entries, sidebar)
+	workspace.Offset = 0.66
+	actions := container.NewHBox(p.acceptLower, p.prepare, p.download)
+	p.content = container.NewBorder(nil,
+		container.NewVBox(widget.NewSeparator(), container.NewBorder(nil, nil, nil, actions, p.estimate)), nil, nil, workspace)
 	p.content.Hide()
 	return p
 }
@@ -169,19 +205,26 @@ func newYouTubePlaylist(y *youtubeView) *youtubePlaylist {
 func (p *youtubePlaylist) reset() {
 	p.page = media.PlaylistPage{}
 	p.selected = map[int]playlistChoice{}
-	p.jobs = nil
-	p.batch = ""
+	p.invalidate()
 	p.content.Hide()
 	p.download.Disable()
 }
 func (p *youtubePlaylist) invalidate() {
+	if len(p.jobs) > 0 {
+		for index, choice := range p.selected {
+			choice.note, choice.lower, choice.job = "", false, nil
+			p.selected[index] = choice
+		}
+		p.list.Refresh()
+	}
 	p.jobs = nil
 	p.batch = ""
 	if p.acceptLower != nil {
 		p.acceptLower.SetChecked(false)
+		p.acceptLower.Hide()
 	}
-	p.count.SetText(fmt.Sprintf("%d / 1,000 selected across pages", len(p.selected)))
-	p.estimate.SetText("Disk requirements: Unknown. Load selected formats before downloading.")
+	p.count.SetText(fmt.Sprintf("%d selected / 1,000", len(p.selected)))
+	p.estimate.SetText("Select videos, then load formats.")
 	p.prepare.Enable()
 	if len(p.selected) == 0 {
 		p.prepare.Disable()
@@ -206,7 +249,7 @@ func (p *youtubePlaylist) choose(entry media.PlaylistEntry, selected bool) {
 	p.invalidate()
 }
 func (p *youtubePlaylist) setBusy(busy bool) {
-	for _, object := range []fyne.Disableable{p.previous, p.next, p.all, p.clear, p.prepare, p.kind, p.format, p.quality, p.bitrate, p.folder, p.acceptLower} {
+	for _, object := range []fyne.Disableable{p.previous, p.next, p.all, p.clear, p.prepare, p.kind, p.format, p.quality, p.bitrate, p.folder, p.browse, p.acceptLower} {
 		if busy {
 			object.Disable()
 		} else {
@@ -317,10 +360,11 @@ func (p *youtubePlaylist) load(first int) {
 				p.heading.SetText(page.Title + " · No entries on this page")
 			}
 			p.content.Show()
+			y.empty.Hide()
 			p.list.Refresh()
 			p.setBusy(false)
-			p.count.SetText(fmt.Sprintf("%d / 1,000 selected across pages", len(p.selected)))
-			y.status.SetText("Select playlist entries, choose preferred output, then load selected formats. Nothing has been downloaded.")
+			p.count.SetText(fmt.Sprintf("%d selected / 1,000", len(p.selected)))
+			y.status.SetText("Choose videos and output settings, then Load selected formats. Nothing has been downloaded.")
 		})
 	}()
 }
@@ -433,11 +477,14 @@ func (p *youtubePlaylist) resolve() {
 				choice.note = "Ready · " + format
 				for _, f := range spec.Video.Formats {
 					if f.ID == selection.VideoFormat {
-						choice.note += " · " + youtubeQuality(f)
+						choice.note += fmt.Sprintf(" · %dp", f.Height)
 					}
 					if f.ID == selection.AudioFormat || selection.AudioFormat == "" {
 						if f.AudioCodec != "none" {
-							choice.note += " · " + youtubeAudio(f)
+							choice.note += " · Audio"
+							if f.Language != "" {
+								choice.note += " (" + f.Language + ")"
+							}
 						}
 					}
 					size := f.Size
@@ -451,7 +498,7 @@ func (p *youtubePlaylist) resolve() {
 					}
 				}
 				if lower {
-					choice.note += " · lower quality: approval required"
+					choice.note += " · Lower quality"
 				}
 			}
 			job := queueEntry{URL: "https://www.youtube.com/watch?v=" + choice.entry.ID, Destination: destination, Media: &spec}
@@ -476,14 +523,20 @@ func (p *youtubePlaylist) resolve() {
 				p.selected[choice.entry.Index] = choice
 			}
 			p.jobs, p.batch = jobs, batch
+			for _, choice := range choices {
+				if choice.lower {
+					p.acceptLower.Show()
+					break
+				}
+			}
 			if known {
-				p.estimate.SetText(fmt.Sprintf("Estimated source transfer: %s %s. Final files and temporary processing space may differ.", dataNumber(float64(total), y.settings.DisplayUnit), displayUnit(y.settings.DisplayUnit)))
+				p.estimate.SetText(fmt.Sprintf("Transfer: %s %s · Allow extra processing space.", dataNumber(float64(total), y.settings.DisplayUnit), displayUnit(y.settings.DisplayUnit)))
 			} else {
-				p.estimate.SetText("Disk requirements: Unknown for one or more entries. Final files and temporary processing space may differ.")
+				p.estimate.SetText("Size unknown · Allow extra processing space.")
 			}
 			p.list.Refresh()
 			p.updateDownload()
-			y.status.SetText("Selected formats loaded. Review entry details and skipped items; accept lower qualities or deselect those entries, then Download.")
+			y.status.SetText("Formats ready. Review skipped videos and approve any lower qualities, then Download.")
 		})
 	}()
 }
@@ -493,19 +546,23 @@ func (p *youtubePlaylist) updateDownload() {
 	}
 	p.download.Disable()
 	y := p.owner
-	if y.busy || y.closed || y.submitting || y.submitPlaylist == nil || len(p.jobs) == 0 || y.canDownload != nil && !y.canDownload() {
-		return
-	}
-	ready := false
+	ready, needsApproval := 0, false
 	for _, choice := range p.selected {
 		if choice.lower && !p.acceptLower.Checked {
-			return
+			needsApproval = true
 		}
-		ready = ready || choice.job != nil
+		if choice.job != nil {
+			ready++
+		}
 	}
-	if ready {
-		p.download.Enable()
+	p.download.SetText("Download")
+	if ready > 0 && len(p.jobs) > 0 {
+		p.download.SetText(fmt.Sprintf("Download %d", ready))
 	}
+	if y.busy || y.closed || y.submitting || y.submitPlaylist == nil || len(p.jobs) == 0 || needsApproval || ready == 0 || y.canDownload != nil && !y.canDownload() {
+		return
+	}
+	p.download.Enable()
 }
 func (p *youtubePlaylist) submit() {
 	y := p.owner

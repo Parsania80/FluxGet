@@ -63,8 +63,9 @@ func TestManagementControlsCollapsedAndWaitForAcknowledgment(t *testing.T) {
 	}
 	var pending func(error)
 	var submitted speedSettings
-	s.applyDownloads = func(next speedSettings, done func(error)) { submitted = next; pending = done }
-	page := s.page(w, nil, func() bool { return true })
+	applyCalls := 0
+	s.applyDownloads = func(next speedSettings, done func(error)) { applyCalls++; submitted = next; pending = done }
+	page := s.page(w, nil, func() bool { return true }, nil)
 	w.SetContent(page)
 	w.Resize(fyne.NewSize(1100, 720))
 	w.Show()
@@ -86,6 +87,12 @@ func TestManagementControlsCollapsedAndWaitForAcknowledgment(t *testing.T) {
 	var walk func(fyne.CanvasObject)
 	walk = func(object fyne.CanvasObject) {
 		switch o := object.(type) {
+		case *container.AppTabs:
+			for _, item := range o.Items {
+				walk(item.Content)
+			}
+		case *widget.Card:
+			walk(o.Content)
 		case *container.Scroll:
 			walk(o.Content)
 		case *fyne.Container:
@@ -117,7 +124,8 @@ func TestManagementControlsCollapsedAndWaitForAcknowledgment(t *testing.T) {
 	}
 	mode.SetSelected("Manual")
 	test.Tap(save)
-	if pending == nil || submitted.ManagementMode != "manual" {
+	test.Tap(save)
+	if pending == nil || submitted.ManagementMode != "manual" || applyCalls != 1 || !save.Disabled() {
 		t.Fatal("configuration was not submitted")
 	}
 	if s.ManagementMode != "automatic" {
@@ -128,7 +136,7 @@ func TestManagementControlsCollapsedAndWaitForAcknowledgment(t *testing.T) {
 		t.Fatal("persisted policy before scheduler acknowledgment")
 	}
 	pending(os.ErrPermission)
-	if s.ManagementMode != "automatic" {
+	if s.ManagementMode != "automatic" || save.Disabled() {
 		t.Fatal("rejected configuration changed settings")
 	}
 	test.Tap(save)
@@ -198,7 +206,7 @@ func TestHardwareObservationsStayRuntimeOnlyAndRender(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page := s.page(w, nil, func() bool { return true })
+	page := s.page(w, nil, func() bool { return true }, nil)
 	w.SetContent(page)
 	w.Resize(fyne.NewSize(1100, 850))
 	cpu, rss := 42.0, uint64(64<<20)
@@ -219,6 +227,11 @@ func TestHardwareObservationsStayRuntimeOnlyAndRender(t *testing.T) {
 		var open func(fyne.CanvasObject)
 		open = func(o fyne.CanvasObject) {
 			switch o := o.(type) {
+			case *container.AppTabs:
+				o.SelectIndex(1)
+				open(o.Items[1].Content)
+			case *widget.Card:
+				open(o.Content)
 			case *container.Scroll:
 				open(o.Content)
 			case *fyne.Container:
