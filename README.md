@@ -138,7 +138,7 @@ Resume uses the same output path and requires a valid saved checkpoint. The stan
 
 ## Development
 
-Development uses `main`. The passing folder feature is merged; v2.0.0 release preparation is on `codex/release-v2.0.0`. Publish this branch through GitHub Desktop and open a pull request to rehearse both installers, including first-use media setup. After the checks pass and the branch is merged, a `v2.0.0` tag triggers publication. The first release remains preserved as `v1.0.0`.
+Development uses `main`. The passing folder feature is merged; v2.0.0 release preparation is on `release-v2.0.0`. Publish this branch through GitHub Desktop and open a pull request to rehearse both installers, including first-use media setup. After the checks pass and the branch is merged, a `v2.0.0` tag triggers publication. The first release remains preserved as `v1.0.0`.
 
 The engine and desktop are separate Go modules. Run checks in both:
 
