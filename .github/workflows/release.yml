@@ -1,6 +1,13 @@
 name: Release
 
 on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - 'packaging/**'
+      - 'media/**'
+      - 'internal/buildinfo/**'
   push:
     tags: ['v*.*.*']
 
@@ -19,7 +26,7 @@ jobs:
           - platform: windows
             os: windows-2022
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash
@@ -36,12 +43,12 @@ jobs:
           python-version: '3.12'
       - name: Validate version and formatting
         run: |
-          if [[ "$GITHUB_REF_TYPE" != tag || ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+          if [[ "$GITHUB_REF_TYPE" == tag && ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
             echo 'Release tags must have the form vMAJOR.MINOR.PATCH, for example v1.0.0.' >&2
             exit 1
           fi
           version=$(tr -d '\r\n' < internal/buildinfo/version.txt)
-          if [[ "$GITHUB_REF_NAME" != "v$version" ]]; then
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "v$version" ]]; then
             echo 'Tag does not match the source version.' >&2
             exit 1
           fi
@@ -51,7 +58,7 @@ jobs:
             exit 1
           fi
           node --test extensions/core.test.cjs
-          python -m py_compile packaging/build_release.py packaging/build_deb.py packaging/build_browser_extensions.py packaging/install_browser_bridge.py
+          python -m py_compile packaging/build_release.py packaging/build_deb.py packaging/build_browser_extensions.py packaging/install_browser_bridge.py packaging/verify_media_setup.py
       - name: Linux desktop build dependencies
         if: runner.os == 'Linux'
         run: |
@@ -75,10 +82,10 @@ jobs:
         env:
           CGO_ENABLED: '1'
         run: |
-          go test -race -count=1 -v -run '^TestWindows' ./... 2>&1 | tee "$RUNNER_TEMP/fluxget-windows-tests.log"
+          go test -race -count=1 -v -run '^(TestWindows|TestSorted|TestMediaTool)' ./... 2>&1 | tee "$RUNNER_TEMP/fluxget-windows-tests.log"
           go vet ./...
           cd desktop
-          go test -race -tags ci -count=1 -v -run '^(TestDownloadUsesExistingCLI|TestPausedDownloadCanResume|TestDesktopQueueUsesPersistentCLIScheduler)$' . 2>&1 | tee -a "$RUNNER_TEMP/fluxget-windows-tests.log"
+          go test -race -tags ci -count=1 -v -run '^(TestDownloadUsesExistingCLI|TestPausedDownloadCanResume|TestDesktopQueueUsesPersistentCLIScheduler|TestProxy|TestYouTube|TestUnifiedSorted|TestSpeedSettingsPersist|TestSettingsUnitSelector)' . 2>&1 | tee -a "$RUNNER_TEMP/fluxget-windows-tests.log"
           go vet -tags ci ./...
       - name: Build native installer
         env:
@@ -96,6 +103,7 @@ jobs:
           ldd /opt/fluxget/fluxget-gui | tee "$RUNNER_TEMP/fluxget-runtime-libraries.txt"
           if grep -q 'not found' "$RUNNER_TEMP/fluxget-runtime-libraries.txt"; then exit 1; fi
           test -f /etc/opt/chrome/native-messaging-hosts/io.github.parsania80.fluxget.json
+          python packaging/verify_media_setup.py --engine /opt/fluxget/fluxget
           sudo dpkg -r fluxget
           test ! -e /opt/fluxget/fluxget
           test ! -e /etc/opt/chrome/native-messaging-hosts/io.github.parsania80.fluxget.json
@@ -114,6 +122,8 @@ jobs:
           $process = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$target`"") -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw 'Setup repair failed' }
           if (-not (Test-Path "$target/extensions/chrome/manifest.json")) { throw 'Repair lost extension files' }
+          python packaging/verify_media_setup.py --engine "$target/fluxget.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Installed YouTube setup or native media acceptance failed' }
           $process = Start-Process -FilePath "$target/unins000.exe" -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw 'Uninstall failed' }
           if (Test-Path "$target/fluxget.exe") { throw 'Uninstall left application executable' }

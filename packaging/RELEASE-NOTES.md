@@ -1,3 +1,38 @@
+# FluxGet 2.0.0
+
+YouTube downloads, optional proxy routing and automatic download folders for Linux and Windows on 64-bit Intel/AMD computers.
+
+- Download public YouTube videos, Shorts and selected entries from finite playlists. Choose available video/audio formats and quality; merge video/audio or convert audio to MP3. Jobs appear in Downloads with the usual pause, resume, cancel and speed controls.
+- Sort new files into Music, Videos, Pictures, Documents, Archives, Programs and Other inside your chosen download folder. Change the default in General settings or turn it off per download. Existing files stay in place and are never silently overwritten.
+- Use an HTTP, HTTPS or SOCKS5 proxy for selected downloads, YouTube analysis and first-use tool setup. Direct ignores proxy environment variables; a proxy failure never silently changes the route.
+- Improved recovery guidance and no fixed 30-minute cutoff for media transfers. Network timeouts still apply.
+
+## Install or upgrade
+
+Close FluxGet first. Windows users run `fluxget-2.0.0-windows-amd64-setup.exe`; Debian/Ubuntu users install `fluxget_2.0.0_amd64.deb` with `sudo apt install ./fluxget_2.0.0_amd64.deb`. Settings, queued jobs and downloads are kept. Sorting defaults to enabled when no preference was saved; it applies only to new jobs.
+
+Windows requires Windows 10 1809 or newer/11, amd64 and NTFS for downloads and saved progress. Packages are unsigned. Linux packages are built on Ubuntu 22.04, require glibc 2.35 or newer and the declared graphics libraries, and target Debian-family distributions. macOS and ARM64 are not included.
+
+## First YouTube download
+
+Open **YouTube → Media tools → Set up YouTube tools**, then confirm the download. Internet access and about 700 MB of free space are required. The selected proxy is used. Setup downloads pinned upstream yt-dlp, Deno and FFmpeg executables, verifies SHA-256 and makes the complete set available together. No Python or terminal is needed. A canceled or failed setup can be retried; existing tools and downloads are kept.
+
+Third-party executables are downloaded directly from upstream after consent, rather than included in the installer. Their separate licenses apply; see the installed `MEDIA-TOOLS-NOTICES.md`. Tool sets are retained in your user cache, including after uninstall, for saved jobs. Clearing that cache can require setup again. Tool updates ship through tested FluxGet releases, with no extractor self-updater.
+
+Paste a public link and choose **Analyze**. For playlists, choose **Choose from playlist**, select entries and add downloads. Unavailable formats, private/login-required videos, DRM and live streams are outside this release. No cookies or login credentials are imported. YouTube can change independently; availability and resumability are not guaranteed.
+
+## Browser setup and acceptance boundaries
+
+Installers register Chrome/Firefox native hosts and include development extension folders with stable IDs. Load the matching folder and approve permissions; Firefox persistent installation requires a signed extension. Store distribution, a browser setup wizard, native Windows capture, Firefox Snap/Flatpak and Opera acceptance remain open. Windows setup does not register Opera.
+
+Both native installer jobs must pass before either release asset is published. Release-preparation pull requests rehearse packaging without publishing; publication requires the matching version tag. Checks include installed-engine tool setup, pinned versions/EJS, generated MP4 merge and MP3 conversion through direct/proxy routes, plus engine and desktop regressions. Public-media acceptance has Linux evidence; broader long-duration/storage-pressure acceptance remains open. Linux-specific Automatic resource observations are unavailable on Windows.
+
+Resume requires valid saved progress and server support. Metadata stores full source URLs, including query parameters, while diagnostics redact them. Expired source links and power-loss recovery are not guaranteed. Uninstall keeps user downloads, settings and tools.
+
+---
+
+## Previous release notes
+
 # FluxGet 1.0.0
 
 FluxGet's first numbered desktop release for Linux and Windows on 64-bit Intel/AMD computers.

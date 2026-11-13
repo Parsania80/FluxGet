@@ -4,9 +4,9 @@
 
 FluxGet is a download manager written in Go. It helps you manage several downloads, control their speed, and continue saved downloads after an interruption when the server allows it.
 
-**[Version 1.0.0 is available for Linux and Windows (64-bit Intel/AMD).](https://github.com/Parsania80/FluxGet/releases/tag/v1.0.0)** Native checks and installer verification passed on both operating systems. Release packages are built only when a version tag such as `v1.0.0` is pushed. Branch pushes run checks without publishing packages. Windows browser capture and other Linux distributions still need hands-on testing. macOS is not included.
+**[Version 1.0.0 is available for Linux and Windows (64-bit Intel/AMD).](https://github.com/Parsania80/FluxGet/releases/tag/v1.0.0)** Native checks and installer verification passed on both operating systems. Version tags publish packages after native checks pass. Release-preparation pull requests also build and test installers without publishing them. Windows browser capture and other Linux distributions still need hands-on testing. macOS is not included.
 
-**In development for the next version:** YouTube video and playlist downloads with quality and format choices. Development builds can download a single YouTube video or audio track from the YouTube tab into the Downloads list. The locally installed Linux preview also supports selecting playlist entries; the normal-playlist preview was approved by the operator on 2026-11-13. Public MP3 conversion, a 720p video/audio merge and all four entries of a sample playlist passed through a proxy. Windows desktop acceptance remains open. See the [YouTube roadmap](project.md#youtube-videos-and-playlists--next-release-plan).
+**Preparing v2.0.0:** YouTube videos and playlists, per-download proxy routing, and automatic file-type folders. YouTube has an in-app first-use tool setup; internet access and about 700 MB of free space are required. The folder feature passed Windows CI and was merged into `main`. The native first-use setup passed on Linux, including pinned versions/EJS, MP4 merge and MP3 conversion. Both installed packages must pass release verification before v2.0.0 is published. See the [roadmap](project.md#youtube-videos-and-playlists--next-release-plan).
 
 ## What you can do
 
@@ -62,29 +62,31 @@ Removing an item from the list keeps its files. Deleting files is a separate act
 
 ### Sort downloads into folders
 
-New development builds automatically sort new downloads inside your chosen download folder: **Music**, **Videos**, **Pictures**, **Documents**, **Archives**, **Programs** and **Other**. For example, `song.mp3` goes into `Downloads/Music` and `report.pdf` into `Downloads/Documents`. Unknown extensions go into Other.
+Version 2 builds automatically sort new downloads inside your chosen download folder: **Music**, **Videos**, **Pictures**, **Documents**, **Archives**, **Programs** and **Other**. For example, `song.mp3` goes into `Downloads/Music` and `report.pdf` into `Downloads/Documents`. Unknown extensions go into Other.
 
 Use **Settings → General → Sort new downloads into file-type folders** to change the default, then **Save settings**. You can also turn sorting off for an individual download in Add download, the browser confirmation or the YouTube output settings. Automatic browser capture uses the saved default. YouTube audio goes into Music and video into Videos; playlist filenames keep their order numbers. Sorting follows the final filename extension, including a safe filename supplied by an HTTP server.
 
-Sorting starts enabled when settings have no previous preference. Existing queued or downloaded files stay in place, and existing files are never silently overwritten. The paired Linux preview now includes this feature; it remains outside the published v1.0.0 release.
+Sorting starts enabled when settings have no previous preference. Existing queued or downloaded files stay in place, and existing files are never silently overwritten. This is a v2 feature; the published v1.0.0 release does not include it.
 
 ## Download through a proxy
 
-Available in development builds; not included in v1.0.0.
+Included in v2 builds; not included in v1.0.0.
 
 In **Settings → Proxy**, enter the listening address from v2ray or another proxy app, such as `socks5://127.0.0.1:10808` or `http://127.0.0.1:10809`. Use your app's actual port and keep it running. HTTP, HTTPS and SOCKS5 addresses without a username/password are supported; subscription, vmess and vless links are not proxy addresses.
 
 Choose **Use proxy by default for new downloads** and click **Save settings**, or leave the default off and check **Download with proxy** when adding just one file. Each download has a **Proxy** or **Direct** button. Pause it before changing that choice, apply, then resume. Turning the option off uses Direct; changing the default does not reroute existing downloads.
 
-A failed proxy reports an error and never falls back to Direct automatically. YouTube pages and media files use different servers, and your browser may route requests differently from FluxGet. A media timeout alone does not prove your proxy is broken; compare the configured route and media-tool behavior before choosing a fix. Trying another proxy server is one troubleshooting step. SOCKS5 sends destination names to the proxy for DNS resolution. Direct ignores proxy environment variables and uses the operating system's normal network route. The YouTube tab can use the same configured proxy for analysis and downloading; its development command also accepts `-proxy`.
+A failed proxy reports an error and never falls back to Direct automatically. YouTube pages and media files use different servers, and your browser may route requests differently from FluxGet. A media timeout alone does not prove your proxy is broken; compare the configured route and media-tool behavior before choosing a fix. Trying another proxy server is one troubleshooting step. SOCKS5 sends destination names to the proxy for DNS resolution. Direct ignores proxy environment variables and uses the operating system's normal network route. The YouTube tab can use the same configured proxy for analysis and downloading; the command line also accepts `-proxy`.
 
 ## YouTube preview
 
-Available in development builds; not included in v1.0.0.
+Included in v2 builds; not included in v1.0.0.
 
-Open **YouTube**, paste a public video or Shorts link, and choose **Analyze**. You can cancel analysis or use your configured proxy. Choose **Video** or **Audio only**, an available format and quality, then a folder and filename. Click **Download** to start it in the Downloads list. Use the usual pause, resume and speed controls there. Unfinished jobs reopen paused; damaged or unverified saved media may require **Restart media from beginning**. A rejected saved download range (HTTP 416) can also require an explicit restart; the development source now explains this error. The development source also removes the fixed 30-minute transfer cutoff while keeping pause/cancel and network timeouts. These updates are included in the paired Linux preview installed on 2026-11-13. The locally installed Linux preview also supports selecting playlist entries; the normal-playlist preview was approved by the operator on 2026-11-13.
+On first use, open **YouTube → Media tools → Set up YouTube tools** and confirm the download. FluxGet downloads pinned yt-dlp, Deno and FFmpeg tools directly from their upstream releases and verifies SHA-256 checksums. Setup uses the YouTube tab's selected proxy or Direct, needs internet access and about 700 MB of free space, and can be canceled. No Python, terminal or manual tool download is needed. An existing `tools.json` can also be selected. See [tool notices](packaging/MEDIA-TOOLS-NOTICES.md).
 
-The locally installed preview includes the prepared media tools beside the app. Other development builds need these tools configured. If they are not configured, open **Media tools** and choose their `tools.json` manifest. See the [development setup and roadmap](project.md#youtube-videos-and-playlists--next-release-plan). A full public audio-to-MP3 download passed on Linux. A public 720p video/audio merge also passed full decoding. The media baseline passed native Linux/Windows media/proxy and desktop-control checks in [CI run 43481879691](https://github.com/Parsania80/FluxGet/actions/runs/43481879691) and was merged into main. Subsequent folder-sorting changes still need native Windows CI.
+Paste a public video or Shorts link and choose **Analyze**. Choose **Video** or **Audio only**, format, quality, folder and filename, then **Download**. For a finite playlist, choose **Choose from playlist**, select entries and add them to Downloads. Use the usual pause, resume, cancel and speed controls. Existing files are kept. Unfinished jobs reopen paused; damaged or unverified saved media and rejected saved ranges may require **Restart media from beginning**. Transfers have network timeouts but no fixed 30-minute transfer cutoff.
+
+Public MP3 conversion, a 720p video/audio merge and a four-entry playlist passed on Linux. Media/proxy and desktop-control checks passed on native Linux and Windows. The v2 release additionally requires first-use tool setup and media assembly checks from both installed packages. Broader long-duration and storage-pressure acceptance remains open; this release does not claim universal YouTube availability.
 
 The installed Linux single-video preview was approved by the operator on 2026-11-13; its hands-on preview review is done. Remaining acceptance work includes native Windows desktop checks, a fresh run of the current branch and broader recovery testing; normal-playlist selection is installed locally and was approved by the operator on 2026-11-13. All four entries of a public sample playlist completed as M4A through an isolated persistent queue, with no failures. Stage-5 testing is underway: isolated Linux checks cover interrupted processing, refreshed links, full disk, mixed-download speed limits, one-hour media and bounded CPU/memory pressure. Extended wall-clock/storage and native/public checks remain open.
 
@@ -136,7 +138,7 @@ Resume uses the same output path and requires a valid saved checkpoint. The stan
 
 ## Development
 
-New development uses `main`; the passing media-acceptance branch has been merged. File-type folder sorting is installed in the local Linux preview and passed isolated installed-engine checks. The feature branch `codex/file-type-folders` is ready to publish through GitHub Desktop; branch pushes run Linux and Windows CI, including sorting, queue recovery and preference checks. Native Windows results remain pending. The first release is preserved as tag `v1.0.0`. Only version tags publish installers.
+Development uses `main`. The passing folder feature is merged; v2.0.0 release preparation is on `codex/release-v2.0.0`. Publish this branch through GitHub Desktop and open a pull request to rehearse both installers, including first-use media setup. After the checks pass and the branch is merged, a `v2.0.0` tag triggers publication. The first release remains preserved as `v1.0.0`.
 
 The engine and desktop are separate Go modules. Run checks in both:
 
