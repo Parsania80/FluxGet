@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -87,6 +88,73 @@ func TestServerFilename(t *testing.T) {
 	}
 }
 
+func TestSortedDownloadUsesFinalFilenameAndPreservesConflicts(t *testing.T) {
+	setConfigForProxyTest(t)
+	dir := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Disposition", `attachment; filename="report.PDF"`)
+		_, _ = w.Write([]byte("verified document"))
+	}))
+	defer server.Close()
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"server", nil, filepath.Join("Documents", "report.PDF")},
+		{"explicit", []string{"-name", "chosen.mp3"}, filepath.Join("Music", "chosen.mp3")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append([]string{"-url", server.URL + "/fallback.zip", "-dir", dir, "-sort-files", "-connections", "1"}, tc.args...)
+			var out, stderr bytes.Buffer
+			if code := run(args, &out, &stderr); code != 0 {
+				t.Fatalf("sorted download failed: %s", stderr.String())
+			}
+			path := filepath.Join(dir, tc.want)
+			if data, err := os.ReadFile(path); err != nil || string(data) != "verified document" {
+				t.Fatalf("wrong output: %q, %v", data, err)
+			}
+			if code := run(args, &out, &stderr); code == 0 {
+				t.Fatal("existing categorized file overwritten")
+			}
+			if data, err := os.ReadFile(path); err != nil || string(data) != "verified document" {
+				t.Fatal("existing output changed", err)
+			}
+		})
+	}
+	var out, stderr bytes.Buffer
+	if code := run([]string{"-url", server.URL, "-out", filepath.Join(dir, "exact.pdf"), "-sort-files"}, &out, &stderr); code != 2 {
+		t.Fatal("sorting accepted an exact output path")
+	}
+}
+
+func TestSortedQueueRequiresPendingAutomaticCategory(t *testing.T) {
+	root := t.TempDir()
+	for _, job := range []queueJob{
+		{Destination: filepath.Join(root, "clip.mp3"), AutomaticName: true},
+		{Destination: filepath.Join(root, "Music", "clip.pdf"), AutomaticName: true},
+		{Destination: filepath.Join(root, "Music", "clip.mp3"), AutomaticName: false},
+	} {
+		job.SortFiles, job.ID, job.URL, job.State = true, 1, "https://example.com/file", "paused"
+		q := queueData{Version: 2, NextID: 2}
+		if _, err := desktopAdd(&q, job, false); err == nil || !strings.Contains(err.Error(), "category") {
+			t.Fatalf("invalid sorted intake accepted: %+v, %v", job, err)
+		}
+		q.Jobs = []queueJob{job}
+		data, err := json.Marshal(q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(root, "queue.json")
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadQueue(path); err == nil || !strings.Contains(err.Error(), "category") {
+			t.Fatalf("invalid persisted category accepted: %+v, %v", job, err)
+		}
+	}
+}
+
 func TestServerFilenameRetryAndExistingFile(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	dir := t.TempDir()
@@ -115,16 +183,16 @@ func TestServerFilenameRetryAndExistingFile(t *testing.T) {
 
 func TestDestinationOverridesAndUnsafeName(t *testing.T) {
 	dir := t.TempDir()
-	got, err := defaultDestination("https://example.com/file?token=ignored", dir, "chosen.txt")
+	got, err := defaultDestination("https://example.com/file?token=ignored", dir, "chosen.txt", false)
 	if err != nil || got != filepath.Join(dir, "chosen.txt") {
 		t.Fatalf("destination = %q, %v", got, err)
 	}
-	got, err = defaultDestination("https://example.com/", dir, "")
+	got, err = defaultDestination("https://example.com/", dir, "", false)
 	if err != nil || got != filepath.Join(dir, "download") {
 		t.Fatalf("fallback = %q, %v", got, err)
 	}
 	for _, name := range []string{"../file", ".", "..", "a\\b", "bad\nname"} {
-		if _, err := defaultDestination("https://example.com/file", dir, name); err == nil {
+		if _, err := defaultDestination("https://example.com/file", dir, name, false); err == nil {
 			t.Errorf("accepted unsafe name %q", name)
 		}
 	}

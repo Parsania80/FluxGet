@@ -36,14 +36,14 @@ jobs:
       - name: Native media contract and generated media acceptance
         run: |
           export FLUXGET_MEDIA_TOOLS="$RUNNER_TEMP/fluxget-media-tools/tools.json"
-          go test -race -count=1 -v ./media ./networkproxy
-          go test -race -count=1 -v -run '^(TestQueueProxy|TestProxyRoute|TestStandaloneCLIProxy|TestBrowserProxy|TestMediaQueue)' .
-          go vet ./media ./networkproxy ./cmd/fluxget-media-spike
+          go test -race -count=1 -v ./media ./networkproxy ./internal/downloadcategory
+          go test -race -count=1 -v -run '^(TestQueueProxy|TestProxyRoute|TestStandaloneCLIProxy|TestBrowserProxy|TestMediaQueue|TestSorted)' .
+          go vet ./media ./networkproxy ./internal/downloadcategory ./cmd/fluxget-media-spike
           go run ./cmd/fluxget-media-spike -tools "$FLUXGET_MEDIA_TOOLS" -mode probe
       - name: Native proxy and YouTube desktop controls
         working-directory: desktop
         run: |
-          if go test -race -tags ci -count=1 -v -run '^(TestProxy|TestYouTube)' . > "$RUNNER_TEMP/fluxget-desktop-controls.log" 2>&1; then
+          if go test -race -tags ci -count=1 -v -run '^(TestProxy|TestYouTube|TestUnifiedSorted|TestSpeedSettingsPersist|TestSettingsUnitSelector)' . > "$RUNNER_TEMP/fluxget-desktop-controls.log" 2>&1; then
             cat "$RUNNER_TEMP/fluxget-desktop-controls.log"
           else
             cat "$RUNNER_TEMP/fluxget-desktop-controls.log"

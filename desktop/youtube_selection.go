@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/Parsania80/FluxGet/internal/downloadcategory"
 	"github.com/Parsania80/FluxGet/media"
 )
 
@@ -112,7 +113,7 @@ func youtubeFilename(title, id string) string {
 	return value + " [" + id + "]"
 }
 
-func youtubeDestination(folder, name, extension string) (string, error) {
+func youtubeDestination(folder, name, extension string, sortFiles bool) (string, error) {
 	if !filepath.IsAbs(folder) {
 		return "", errors.New("Choose an existing destination folder.")
 	}
@@ -137,6 +138,12 @@ func youtubeDestination(folder, name, extension string) (string, error) {
 		return "", media.ErrSelection
 	}
 	path := filepath.Join(folder, name+"."+extension)
+	if sortFiles {
+		path, err = downloadcategory.Destination(folder, name+"."+extension)
+		if err != nil {
+			return "", err
+		}
+	}
 	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
 		return "", errors.New("This filename is unavailable. Choose another name; existing files are kept.")
 	}

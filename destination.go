@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"github.com/Parsania80/FluxGet/internal/downloadcategory"
 	"mime"
 	"net/http"
 	"net/url"
@@ -16,7 +17,7 @@ import (
 	"unicode"
 )
 
-func defaultDestination(rawURL, directory, name string) (string, error) {
+func defaultDestination(rawURL, directory, name string, sortFiles bool) (string, error) {
 	if !validQueueURL(rawURL) {
 		return "", errors.New("provide a valid HTTP or HTTPS URL without credentials")
 	}
@@ -40,6 +41,9 @@ func defaultDestination(rawURL, directory, name string) (string, error) {
 		if err := os.MkdirAll(directory, 0o755); err != nil {
 			return "", fmt.Errorf("create Downloads directory: %w", err)
 		}
+	}
+	if sortFiles {
+		return downloadcategory.Destination(directory, name)
 	}
 	return filepath.Join(directory, name), nil
 }

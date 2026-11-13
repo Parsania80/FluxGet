@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/Parsania80/FluxGet/internal/buildinfo"
+	"github.com/Parsania80/FluxGet/internal/downloadcategory"
 	"github.com/Parsania80/FluxGet/networkproxy"
 	"io"
 	"net/http"
@@ -37,6 +38,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	list := flags.Bool("list", false, "List saved download jobs")
 	queue := flags.Bool("queue", false, "Manage a persistent download queue")
 	suggestOutput := flags.Bool("suggest-output", false, "Print the URL-based output path without downloading")
+	sortFiles := flags.Bool("sort-files", false, "Sort new downloads into file-type folders inside the download directory")
 	maxActive := flags.Int("max-active", 5, "Maximum simultaneous queue downloads (1–64)")
 	connections := flags.Int("connections", 4, "Maximum connections per download (1–16)")
 	liveFile := flags.String("live-speed-file", "", "Desktop live speed settings file")
@@ -77,6 +79,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "Choose a proxy per queue download in the desktop app; -proxy is for standalone transfers.")
 		return 2
 	}
+	if *sortFiles && (*queue || *list || *resume || *destination != "") {
+		fmt.Fprintln(stderr, "Use -sort-files for a new download with -dir and optional -name; an explicit -out is kept exactly as chosen.")
+		return 2
+	}
 	if *queue {
 		if *list || *suggestOutput || *resume || *rawURL != "" || *destination != "" || *directory != "" || *name != "" || *checksum != "" || flags.NArg() != 0 || *maxActive < 1 || *maxActive > 64 {
 			fmt.Fprintln(stderr, "Use -queue alone, optionally with -max-active from 1 to 64.")
@@ -108,7 +114,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "Use -suggest-output with -url and optional -dir and -name.")
 			return 2
 		}
-		path, err := defaultDestination(*rawURL, *directory, *name)
+		path, err := defaultDestination(*rawURL, *directory, *name, *sortFiles)
 		if err != nil {
 			fmt.Fprintf(stderr, "Choose destination: %v\n", err)
 			return 2
@@ -130,7 +136,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	pendingName := !*resume && *destination == "" && *name == ""
 	if !*resume && *destination == "" {
-		path, err := defaultDestination(*rawURL, *directory, *name)
+		path, err := defaultDestination(*rawURL, *directory, *name, *sortFiles)
 		if err != nil {
 			fmt.Fprintf(stderr, "Choose destination: %v\n", err)
 			return 2
@@ -166,8 +172,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 			var resolve func(http.Header) error
 			if pendingName {
 				resolve = func(header http.Header) error {
-					if filename := serverFilename(header); filename != "" {
-						*destination = filepath.Join(filepath.Dir(*destination), filename)
+					base := filepath.Dir(*destination)
+					filename := filepath.Base(*destination)
+					if serverName := serverFilename(header); serverName != "" {
+						filename = serverName
+					}
+					if *sortFiles {
+						path, err := downloadcategory.Destination(filepath.Dir(base), filename)
+						if err != nil {
+							return err
+						}
+						*destination = path
+					} else {
+						*destination = filepath.Join(base, filename)
 					}
 					pendingName = false
 					return nil

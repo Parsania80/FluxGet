@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Parsania80/FluxGet/browserbridge"
+	"github.com/Parsania80/FluxGet/internal/downloadcategory"
 	"github.com/Parsania80/FluxGet/networkproxy"
 )
 
@@ -397,6 +398,7 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 			} else {
 				q.Jobs[i].Destination = request.destination
 				q.Jobs[i].AutomaticName = false
+				q.Jobs[i].SortFiles = false
 				q.Jobs[i].Conflict = ""
 				if nameErr = persist(); nameErr != nil {
 					shutdown(nameErr)
@@ -701,6 +703,7 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 								requestErr = errors.New("partial data exists; keep it and add a separate download instead")
 							} else {
 								q.Jobs[i].Destination, q.Jobs[i].AutomaticName, q.Jobs[i].Conflict = req.Job.Destination, false, ""
+								q.Jobs[i].SortFiles = false
 								q.Jobs[i].Message, q.Jobs[i].Progress, q.Jobs[i].State = "", "", "paused"
 								q.Jobs[i].OutputPath, q.Jobs[i].SavedProgress = "", nil
 								delete(layouts, req.Job.ID)
@@ -1035,6 +1038,13 @@ func runQueueDownloadWithProgress(ctx context.Context, j queueJob, connections i
 				if name := serverFilename(header); name != "" {
 					destination = filepath.Join(filepath.Dir(destination), name)
 				}
+				if j.SortFiles {
+					var err error
+					destination, err = downloadcategory.Destination(filepath.Dir(filepath.Dir(j.Destination)), filepath.Base(destination))
+					if err != nil {
+						return err
+					}
+				}
 				requests, ok := ctx.Value(queueNameKey{}).(chan queueNameRequest)
 				if !ok {
 					return errors.New("automatic filenames require the scheduler owner")
@@ -1054,6 +1064,7 @@ func runQueueDownloadWithProgress(ctx context.Context, j queueJob, connections i
 					return ctx.Err()
 				}
 				j.Destination, j.AutomaticName = destination, false
+				j.SortFiles = false
 				return nil
 			}
 			_, err := downloadFreshNamed(ctx, client, j.URL, &j.Destination, j.ExpectedSHA256, progress, connections, resolve)

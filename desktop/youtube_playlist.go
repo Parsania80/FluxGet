@@ -39,6 +39,7 @@ type youtubePlaylist struct {
 	kind, format, quality, bitrate                *widget.Select
 	folder                                        *widget.Entry
 	acceptLower                                   *widget.Check
+	sortFiles                                     *widget.Check
 	qualityPanel, bitratePanel                    *fyne.Container
 	browse                                        *widget.Button
 	jobs                                          []queueEntry
@@ -136,7 +137,10 @@ func newYouTubePlaylist(y *youtubeView) *youtubePlaylist {
 	p.bitrate.Disable()
 	p.folder = widget.NewEntry()
 	p.folder.SetText(y.folder.Text)
+	p.sortFiles = widget.NewCheck("Sort into a file-type folder", nil)
+	p.sortFiles.SetChecked(y.settings.SortFiles)
 	p.folder.OnChanged = func(string) { p.invalidate() }
+	p.sortFiles.OnChanged = func(bool) { p.invalidate() }
 	p.kind.OnChanged = func(value string) {
 		p.format.ClearSelected()
 		if value == "Audio only" {
@@ -188,7 +192,7 @@ func newYouTubePlaylist(y *youtubeView) *youtubePlaylist {
 	settings := container.NewVBox(
 		container.NewGridWithColumns(2, container.NewVBox(widget.NewLabel("Save as"), p.kind), container.NewVBox(widget.NewLabel("Format"), p.format)),
 		p.qualityPanel, p.bitratePanel, widget.NewLabel("Save to"),
-		container.NewBorder(nil, nil, nil, p.browse, p.folder), fileNote)
+		container.NewBorder(nil, nil, nil, p.browse, p.folder), p.sortFiles, fileNote)
 	sidebar := widget.NewCard("Download settings", "", container.NewVScroll(settings))
 	entries := widget.NewCard("", "", container.NewBorder(
 		container.NewVBox(p.heading, container.NewBorder(nil, nil, nil, container.NewHBox(p.all, p.clear), p.count)),
@@ -249,7 +253,7 @@ func (p *youtubePlaylist) choose(entry media.PlaylistEntry, selected bool) {
 	p.invalidate()
 }
 func (p *youtubePlaylist) setBusy(busy bool) {
-	for _, object := range []fyne.Disableable{p.previous, p.next, p.all, p.clear, p.prepare, p.kind, p.format, p.quality, p.bitrate, p.folder, p.browse, p.acceptLower} {
+	for _, object := range []fyne.Disableable{p.previous, p.next, p.all, p.clear, p.prepare, p.kind, p.format, p.quality, p.bitrate, p.folder, p.browse, p.acceptLower, p.sortFiles} {
 		if busy {
 			object.Disable()
 		} else {
@@ -421,6 +425,7 @@ func (p *youtubePlaylist) resolve() {
 	maximum, _ := strconv.Atoi(strings.TrimSuffix(p.quality.Selected, "p"))
 	bitrate, _ := strconv.Atoi(strings.TrimSuffix(p.bitrate.Selected, " kbps"))
 	folder, manifest, route := strings.TrimSpace(p.folder.Text), strings.TrimSpace(y.tools.Text), y.route
+	sortFiles := p.sortFiles.Checked
 	analyze, dispatch := y.analyzer, y.dispatch
 	ctx, cancel := context.WithCancel(context.Background())
 	y.cancelRun = cancel
@@ -466,7 +471,7 @@ func (p *youtubePlaylist) resolve() {
 				if selection.Container == "mp3" {
 					profile = fmt.Sprintf(" - %dkbps", selection.MP3Kbps)
 				}
-				destination, err = youtubeDestination(folder, fmt.Sprintf("%06d - %s%s", choice.entry.Index, youtubeFilename(video.Title, video.ID), profile), selection.Container)
+				destination, err = youtubeDestination(folder, fmt.Sprintf("%06d - %s%s", choice.entry.Index, youtubeFilename(video.Title, video.ID), profile), selection.Container, sortFiles)
 			}
 			if err != nil {
 				choice.note = "Skipped: unavailable source, incompatible preferred format or destination conflict."

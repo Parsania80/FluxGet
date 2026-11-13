@@ -104,7 +104,7 @@ func TestCommonLimitValuesReopenWithoutStorageDecimals(t *testing.T) {
 }
 
 func TestSettingsUnitSelectorPersistsWithoutChangingLimits(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	setTestConfig(t, t.TempDir())
 	a := test.NewApp()
 	defer a.Quit()
 	w := a.NewWindow("Settings")
@@ -121,6 +121,7 @@ func TestSettingsUnitSelectorPersistsWithoutChangingLimits(t *testing.T) {
 	page := s.page(w, func() { saved++ }, func() bool { return true }, nil)
 	w.SetContent(page)
 	var selectUnit *widget.Select
+	var sortFiles *widget.Check
 	var save *widget.Button
 	var walk func(fyne.CanvasObject)
 	walk = func(object fyne.CanvasObject) {
@@ -145,6 +146,10 @@ func TestSettingsUnitSelectorPersistsWithoutChangingLimits(t *testing.T) {
 			if len(o.Options) == 3 && o.Options[0] == "KB" {
 				selectUnit = o
 			}
+		case *widget.Check:
+			if o.Text == "Sort new downloads into file-type folders" {
+				sortFiles = o
+			}
 		case *widget.Button:
 			if o.Text == "Save settings" {
 				save = o
@@ -152,14 +157,15 @@ func TestSettingsUnitSelectorPersistsWithoutChangingLimits(t *testing.T) {
 		}
 	}
 	walk(page)
-	if selectUnit == nil || save == nil || selectUnit.Selected != "MB" {
+	if selectUnit == nil || save == nil || selectUnit.Selected != "MB" || sortFiles == nil || !sortFiles.Checked {
 		t.Fatal("missing default MB unit selector")
 	}
 	for _, unit := range []string{"GB", "KB", "MB"} {
 		selectUnit.SetSelected(unit)
+		test.Tap(sortFiles)
 		test.Tap(save)
 		loaded, err := loadSpeedSettings()
-		if err != nil || loaded.DisplayUnit != unit || loaded.Default != 512 || loaded.Overall != 2048 || loaded.Overrides["queue:1"] != 128 {
+		if err != nil || loaded.SortFiles != sortFiles.Checked || loaded.DisplayUnit != unit || loaded.Default != 512 || loaded.Overall != 2048 || loaded.Overrides["queue:1"] != 128 {
 			t.Fatalf("saving %s changed limits: %+v %v", unit, loaded, err)
 		}
 	}

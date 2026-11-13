@@ -35,6 +35,7 @@ type youtubeView struct {
 	link, tools, folder, filename                       *widget.Entry
 	kind, format, quality, audio, bitrate               *widget.Select
 	useProxy                                            *widget.Check
+	sortFiles                                           *widget.Check
 	proxyNote, status, title, details, size, formatNote *widget.Label
 	analyze, cancel, browseTools, download              *widget.Button
 	spinner                                             *widget.ProgressBarInfinite
@@ -127,6 +128,8 @@ func newYouTubeView(w fyne.Window, settings *speedSettings, executable string) *
 		}
 	}
 	y.filename = widget.NewEntry()
+	y.sortFiles = widget.NewCheck("Sort into a file-type folder", nil)
+	y.sortFiles.SetChecked(settings.SortFiles)
 	browseFolder := widget.NewButtonWithIcon("Browse…", theme.FolderOpenIcon(), func() {
 		dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
 			if y.closed {
@@ -146,7 +149,7 @@ func newYouTubeView(w fyne.Window, settings *speedSettings, executable string) *
 	output := container.NewVBox(widget.NewForm(widget.NewFormItem("Save as", y.kind), widget.NewFormItem("Format", y.format), widget.NewFormItem("Video quality", y.quality), widget.NewFormItem("Audio track", y.audio)), y.bitratePanel)
 	fileNote := widget.NewLabel("The file extension is added automatically. Existing files are kept.")
 	fileNote.Wrapping = fyne.TextWrapWord
-	destination := container.NewVBox(widget.NewForm(widget.NewFormItem("Folder", container.NewBorder(nil, nil, nil, browseFolder, y.folder)), widget.NewFormItem("Filename", y.filename)), fileNote)
+	destination := container.NewVBox(widget.NewForm(widget.NewFormItem("Folder", container.NewBorder(nil, nil, nil, browseFolder, y.folder)), widget.NewFormItem("Filename", y.filename)), y.sortFiles, fileNote)
 	y.options = container.NewBorder(container.NewVBox(y.title, y.details),
 		container.NewVBox(y.formatNote, widget.NewSeparator(), container.NewBorder(nil, nil, nil, y.download, y.size)), nil, nil,
 		container.NewVScroll(container.NewGridWithColumns(2, widget.NewCard("Output", "Choose the format and quality", output), widget.NewCard("Save to", "Choose where to keep your file", destination))))
@@ -176,6 +179,7 @@ func newYouTubeView(w fyne.Window, settings *speedSettings, executable string) *
 	y.bitrate.OnChanged = func(string) { y.selectionChanged() }
 	y.folder.OnChanged = func(string) { y.updateDownloadEnabled() }
 	y.filename.OnChanged = func(string) { y.updateDownloadEnabled() }
+	y.sortFiles.OnChanged = func(bool) { y.updateDownloadEnabled() }
 	toolsButton := widget.NewButtonWithIcon("Media tools", theme.SettingsIcon(), func() {
 		note := widget.NewLabel("The installed preview includes media tools. Change this only if you use a different tools.json manifest.")
 		note.Wrapping = fyne.TextWrapWord
@@ -509,7 +513,7 @@ func (y *youtubeView) downloadSelection() {
 		y.status.SetText("Choose an available video and audio combination.")
 		return
 	}
-	path, err := youtubeDestination(strings.TrimSpace(y.folder.Text), strings.TrimSpace(y.filename.Text), selection.Container)
+	path, err := youtubeDestination(strings.TrimSpace(y.folder.Text), strings.TrimSpace(y.filename.Text), selection.Container, y.sortFiles.Checked)
 	if err != nil {
 		y.status.SetText(err.Error())
 		return

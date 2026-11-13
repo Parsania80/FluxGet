@@ -256,30 +256,57 @@ func TestYouTubeUnavailableFormatsAndExplicitAlternative(t *testing.T) {
 func TestYouTubeDestinationReviewPreservesFiles(t *testing.T) {
 	folder := t.TempDir()
 	for _, name := range []string{"../escape", "a/b", "a\\b", "name:stream", "CON", "con .txt", "COM¹", "NUL.txt", "trailing.", "bad\x00name"} {
-		if _, err := youtubeDestination(folder, name, "mp4"); err == nil {
+		if _, err := youtubeDestination(folder, name, "mp4", false); err == nil {
 			t.Fatalf("accepted unsafe filename %q", name)
 		}
 	}
 	name := youtubeFilename(strings.Repeat("🎬", 100)+" /\\bad", "AAAAAAAAAAA")
-	path, err := youtubeDestination(folder, name, "mp4")
+	path, err := youtubeDestination(folder, name, "mp4", false)
 	if err != nil || filepath.Dir(path) != folder {
 		t.Fatal("sanitized Unicode filename invalid", err)
 	}
 	if err := os.WriteFile(path, []byte("keep existing"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := youtubeDestination(folder, name, "mp4"); err == nil {
+	if _, err := youtubeDestination(folder, name, "mp4", false); err == nil {
 		t.Fatal("existing file could be overwritten")
 	}
 	data, _ := os.ReadFile(path)
 	if string(data) != "keep existing" {
 		t.Fatal("review modified existing file")
 	}
-	if _, err := youtubeDestination("relative", "video", "mp4"); err == nil {
+	if _, err := youtubeDestination("relative", "video", "mp4", false); err == nil {
 		t.Fatal("accepted relative folder")
 	}
-	if _, err := youtubeDestination(folder, "video", "../escape"); err == nil {
+	if _, err := youtubeDestination(folder, "video", "../escape", false); err == nil {
 		t.Fatal("accepted arbitrary extension")
+	}
+}
+
+func TestYouTubeSortsSelectedVideoAndAudioOutputs(t *testing.T) {
+	y, queue := youtubeTestView(t)
+	loadYouTubeFixture(t, y, queue)
+	var submitted queueEntry
+	y.submit = func(entry queueEntry, finish func(error)) {
+		submitted = entry
+		finish(errors.New("fixture admission"))
+	}
+	y.sortFiles.SetChecked(true)
+	for _, tc := range []struct{ kind, format, folder string }{
+		{"Video", "MP4", "Videos"}, {"Audio only", "MP3", "Music"},
+	} {
+		y.kind.SetSelected(tc.kind)
+		y.format.SetSelected(tc.format)
+		test.Tap(y.download)
+		want := filepath.Join(y.folder.Text, tc.folder, y.filename.Text+"."+strings.ToLower(tc.format))
+		if submitted.Destination != want || submitted.Media == nil || submitted.SortFiles || submitted.AutomaticName {
+			t.Fatalf("wrong sorted media admission: %+v, want %s", submitted, want)
+		}
+	}
+	y.sortFiles.SetChecked(false)
+	test.Tap(y.download)
+	if filepath.Dir(submitted.Destination) != y.folder.Text {
+		t.Fatal("media sorting opt-out ignored")
 	}
 }
 
@@ -382,7 +409,7 @@ func TestYouTubeDownloadButtonGuardsPendingAndExistingDestination(t *testing.T) 
 		t.Fatal("successful submit left a duplicate download action active")
 	}
 	loadYouTubeFixture(t, y, queue)
-	path, err := youtubeDestination(y.folder.Text, y.filename.Text, "mp4")
+	path, err := youtubeDestination(y.folder.Text, y.filename.Text, "mp4", false)
 	if err != nil {
 		t.Fatal(err)
 	}
