@@ -170,8 +170,6 @@ func (c *Client) download(ctx context.Context, video Video, selection Selection,
 	if !filepath.IsAbs(options.Directory) || options.LimitBytesPerSecond < 0 || options.LimitBytesPerSecond > 1<<40 {
 		return Result{}, errors.New("invalid media scratch directory or speed ceiling")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
-	defer cancel()
 	release, err := c.acquire(ctx)
 	if err != nil {
 		return Result{}, err

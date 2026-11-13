@@ -42,7 +42,22 @@ jobs:
           go run ./cmd/fluxget-media-spike -tools "$FLUXGET_MEDIA_TOOLS" -mode probe
       - name: Native proxy and YouTube desktop controls
         working-directory: desktop
-        run: go test -race -tags ci -count=1 -v -run '^(TestProxy|TestYouTube)' .
+        run: |
+          if go test -race -tags ci -count=1 -v -run '^(TestProxy|TestYouTube)' . > "$RUNNER_TEMP/fluxget-desktop-controls.log" 2>&1; then
+            cat "$RUNNER_TEMP/fluxget-desktop-controls.log"
+          else
+            cat "$RUNNER_TEMP/fluxget-desktop-controls.log"
+            python - <<'PY'
+          import os
+          from pathlib import Path
+          lines = (Path(os.environ['RUNNER_TEMP']) / 'fluxget-desktop-controls.log').read_text(errors='replace').splitlines()
+          chosen = [line for line in lines if 'FAIL' in line or '.go:' in line or 'Error' in line]
+          message = '\n'.join(chosen or lines[-30:])[-10000:]
+          message = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          print('::error title=Native desktop verification details::' + message)
+          PY
+            exit 1
+          fi
 
   linux:
     name: Linux amd64
