@@ -55,6 +55,8 @@ func (d *toolDiagnostic) reason() string {
 		return "The media server denied access; retry or analyze the video again. Your proxy route may be restricted"
 	case strings.Contains(s, "http error 429"):
 		return "The media server is limiting requests; wait before retrying"
+	case strings.Contains(s, "http error 416"):
+		return "The media server rejected the saved download range; restart this media download from the beginning"
 	case strings.Contains(s, "connection refused"), strings.Contains(s, "unable to connect to proxy"):
 		return "Could not connect; check that your proxy is running and its address is correct"
 	case strings.Contains(s, "requested format is not available"):

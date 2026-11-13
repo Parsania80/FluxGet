@@ -6,7 +6,7 @@ FluxGet is a download manager written in Go. It helps you manage several downloa
 
 **[Version 1.0.0 is available for Linux and Windows (64-bit Intel/AMD).](https://github.com/Parsania80/FluxGet/releases/tag/v1.0.0)** Native checks and installer verification passed on both operating systems. Release packages are built only when a version tag such as `v1.0.0` is pushed. Branch pushes run checks without publishing packages. Windows browser capture and other Linux distributions still need hands-on testing. macOS is not included.
 
-**In development for the next version:** YouTube video and playlist downloads with quality and format choices. Development builds can download a single YouTube video or audio track from the YouTube tab into the Downloads list. The locally installed Linux preview also supports selecting playlist entries; the normal-playlist preview was approved by the operator on 2026-11-13. Public audio downloading and MP3 conversion passed through a proxy; public video downloads and Windows media checks are still pending. See the [YouTube roadmap](project.md#youtube-videos-and-playlists--next-release-plan).
+**In development for the next version:** YouTube video and playlist downloads with quality and format choices. Development builds can download a single YouTube video or audio track from the YouTube tab into the Downloads list. The locally installed Linux preview also supports selecting playlist entries; the normal-playlist preview was approved by the operator on 2026-11-13. Public MP3 conversion, a 720p video/audio merge and all four entries of a sample playlist passed through a proxy. Windows desktop acceptance remains open. See the [YouTube roadmap](project.md#youtube-videos-and-playlists--next-release-plan).
 
 ## What you can do
 
@@ -74,11 +74,11 @@ A failed proxy reports an error and never falls back to Direct automatically. Yo
 
 Available in development builds; not included in v1.0.0.
 
-Open **YouTube**, paste a public video or Shorts link, and choose **Analyze**. You can cancel analysis or use your configured proxy. Choose **Video** or **Audio only**, an available format and quality, then a folder and filename. Click **Download** to start it in the Downloads list. Use the usual pause, resume and speed controls there. Unfinished jobs reopen paused; damaged or unverified saved media may require **Restart media from beginning**. The locally installed Linux preview also supports selecting playlist entries; the normal-playlist preview was approved by the operator on 2026-11-13.
+Open **YouTube**, paste a public video or Shorts link, and choose **Analyze**. You can cancel analysis or use your configured proxy. Choose **Video** or **Audio only**, an available format and quality, then a folder and filename. Click **Download** to start it in the Downloads list. Use the usual pause, resume and speed controls there. Unfinished jobs reopen paused; damaged or unverified saved media may require **Restart media from beginning**. A rejected saved download range (HTTP 416) can also require an explicit restart; the development source now explains this error. The development source also removes the fixed 30-minute transfer cutoff while keeping pause/cancel and network timeouts. These updates are not installed in the local preview yet. The locally installed Linux preview also supports selecting playlist entries; the normal-playlist preview was approved by the operator on 2026-11-13.
 
-The locally installed preview includes the prepared media tools beside the app. Other development builds need these tools configured. If they are not configured, open **Media tools** and choose their `tools.json` manifest. See the [development setup and roadmap](project.md#youtube-videos-and-playlists--next-release-plan). A full public audio-to-MP3 download passed on Linux. Native Windows media execution and public video/merge checks remain pending.
+The locally installed preview includes the prepared media tools beside the app. Other development builds need these tools configured. If they are not configured, open **Media tools** and choose their `tools.json` manifest. See the [development setup and roadmap](project.md#youtube-videos-and-playlists--next-release-plan). A full public audio-to-MP3 download passed on Linux. A public 720p video/audio merge also passed full decoding. The acceptance branch passed native Windows media/proxy checks, but its desktop tests encountered a fixture path error. That fixture now uses an absolute path on both platforms; a fresh Windows CI run is pending.
 
-The installed Linux single-video preview was approved by the operator on 2026-11-13; its hands-on preview review is done. Remaining acceptance work includes public video/audio merging, native Windows media checks and broader recovery testing; normal-playlist selection is installed locally and was approved by the operator on 2026-11-13. Public metadata extraction passed for a four-entry playlist; full public playlist transfers remain unverified.
+The installed Linux single-video preview was approved by the operator on 2026-11-13; its hands-on preview review is done. Remaining acceptance work includes native Windows desktop checks, a fresh run of the current branch and broader recovery testing; normal-playlist selection is installed locally and was approved by the operator on 2026-11-13. All four entries of a public sample playlist completed as M4A through an isolated persistent queue, with no failures. Stage-5 testing is underway: isolated Linux checks cover interrupted processing, refreshed links, full disk, mixed-download speed limits, one-hour media and bounded CPU/memory pressure. Extended wall-clock/storage and native/public checks remain open.
 
 The local Linux preview was refreshed with stage-4 playlist selection on 2026-11-13, including matching engine/desktop binaries and the existing pinned media tools. Installed-engine tests passed playlist admission, crash/reopen replay, MP4 merging and MP3 conversion with temporary local fixtures.
 
@@ -128,7 +128,7 @@ Resume uses the same output path and requires a valid saved checkpoint. The stan
 
 ## Development
 
-New development uses `main`; the first release is preserved as tag `v1.0.0`. Only version tags publish installers.
+New development uses `main`; the current acceptance branch is `codex/stage5-media-acceptance`, prepared for a GitHub Desktop push and Windows CI. The first release is preserved as tag `v1.0.0`. Only version tags publish installers.
 
 The engine and desktop are separate Go modules. Run checks in both:
 

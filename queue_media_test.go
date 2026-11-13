@@ -312,6 +312,74 @@ func TestMediaQueueLimitsAndInterruptedRestart(t *testing.T) {
 
 var _ io.Writer = mediaTestReporter{}
 
+func TestMediaQueueRecoveryGuardsKeepSavedData(t *testing.T) {
+	for _, scenario := range []string{"missing-manifest", "missing-tool", "changed-tools", "changed-source"} {
+		t.Run(scenario, func(t *testing.T) {
+			j := mediaQueueJob(t)
+			if scenario == "changed-source" {
+				j.Media.Video.Formats[0].Height = 720
+			}
+			versions := map[string]string{"yt_dlp": "media fixture 1.0", "deno": "media fixture 1.0", "ffmpeg": "media fixture 1.0", "ffprobe": "media fixture 1.0"}
+			if scenario == "changed-tools" {
+				versions["yt_dlp"] = "older fixture"
+			}
+			state, err := createMediaRecord(j, versions)
+			if err != nil {
+				t.Fatal(err)
+			}
+			asset := filepath.Join(state.Workspace, "asset.f137.part")
+			if err := os.WriteFile(asset, []byte("keep verified partial"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := snapshotMediaFiles(t.Context(), &state, j); err != nil {
+				t.Fatal(err)
+			}
+			path, _ := mediaRecordPath(j.Destination)
+			if err := saveMediaRecord(path, state); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "source changed"
+			switch scenario {
+			case "missing-manifest":
+				if err := os.Remove(j.Media.Manifest); err != nil {
+					t.Fatal(err)
+				}
+				want = "tools are missing"
+			case "missing-tool":
+				tools, err := media.LoadTools(j.Media.Manifest)
+				if err != nil {
+					t.Fatal(err)
+				}
+				tools.FFmpeg = filepath.Join(filepath.Dir(tools.FFprobe), "missing-ffmpeg")
+				data, _ := json.Marshal(map[string]any{"tools": tools})
+				if err := os.WriteFile(j.Media.Manifest, data, 0600); err != nil {
+					t.Fatal(err)
+				}
+				want = "tools are missing"
+			case "changed-tools":
+				want = "versions changed"
+			}
+			if err := runMediaCompanion(t.Context(), j, 0, io.Discard); err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("recovery error = %v, want %q", err, want)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("failed recovery changed the previous record", err)
+			}
+			if err := verifyMediaFiles(t.Context(), state, j, false); err != nil {
+				t.Fatal("failed recovery changed saved data", err)
+			}
+			if _, err := os.Lstat(j.Destination); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("failed recovery published a destination", err)
+			}
+		})
+	}
+}
+
 func TestMediaQueueRefusesSymlinkAndForeignHardlink(t *testing.T) {
 	for _, kind := range []string{"symlink", "hardlink"} {
 		t.Run(kind, func(t *testing.T) {

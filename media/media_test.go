@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -138,6 +139,38 @@ func fakeClient(t *testing.T) *Client {
 	return client
 }
 
+func TestDownloadDoesNotExpireWhileWaitingForMediaSlot(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		client := fakeClient(t)
+		client.slot <- struct{}{}
+		video, err := parseVideo([]byte(fixtureMetadata))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := make(chan error, 1)
+		directory := t.TempDir()
+		go func() {
+			_, err := client.Download(ctx, video, Selection{VideoFormat: "137", AudioFormat: "140", Container: "mp4"}, DownloadOptions{Directory: directory})
+			done <- err
+		}()
+		synctest.Wait()
+		time.Sleep(31 * time.Minute)
+		synctest.Wait()
+		select {
+		case err := <-done:
+			t.Fatalf("download expired without caller cancellation: %v", err)
+		default:
+		}
+		cancel()
+		synctest.Wait()
+		if err := <-done; !errors.Is(err, context.Canceled) {
+			t.Fatal("waiting download did not obey caller cancellation", err)
+		}
+	})
+}
+
 func TestURLAndMetadataBoundaries(t *testing.T) {
 	for _, u := range []string{"https://youtu.be/AAAAAAAAAAA", "https://www.youtube.com/watch?v=AAAAAAAAAAA&list=PL123&tracking=secret", "https://youtube.com/shorts/AAAAAAAAAAA"} {
 		got, err := NormalizeVideoURL(u)
@@ -260,6 +293,7 @@ func TestToolFailureDiagnosticsAreActionableAndPrivate(t *testing.T) {
 		{"Read timed out. (read timeout=15.0)", "Media connection timed out"},
 		{"HTTP Error 403: Forbidden", "media server denied access"},
 		{"HTTP Error 429: Too Many Requests", "limiting requests"},
+		{"HTTP Error 416: Requested Range Not Satisfiable", "rejected the saved download range"},
 		{"Connection refused", "check that your proxy is running"},
 		{"Requested format is not available", "choose another format"},
 		{"This video is unavailable", "video is unavailable"},
