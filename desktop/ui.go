@@ -6,6 +6,7 @@ import (
 	"github.com/Parsania80/FluxGet/browserbridge"
 	"github.com/Parsania80/FluxGet/internal/buildinfo"
 	"github.com/Parsania80/FluxGet/internal/platformcmd"
+	"github.com/Parsania80/FluxGet/media"
 	"github.com/Parsania80/FluxGet/networkproxy"
 	"image/color"
 	"net/url"
@@ -82,6 +83,7 @@ func main() {
 }
 
 type downloadsView struct {
+	playlists                                                []media.PlaylistSummary
 	browsers                                                 *browserIntegration
 	youtube                                                  *youtubeView
 	managementNote                                           *widget.Label
@@ -213,14 +215,14 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 		if !v.ready || v.busy || v.closing || j.ID == 0 {
 			routeButton.Disable()
 		}
-		details := j.displayState() + "  ·  " + downloadDetails(j, v.settings.DisplayUnit)
+		details := j.displayState() + "  ·  " + playlistDetails(j) + downloadDetails(j, v.settings.DisplayUnit)
 		if j.Activity != "" {
-			details = j.Activity + "  ·  " + downloadDetails(j, v.settings.DisplayUnit)
+			details = j.Activity + "  ·  " + playlistDetails(j) + downloadDetails(j, v.settings.DisplayUnit)
 		} else if j.State == "running" && j.Requests != nil && j.Requests.Active == 0 && j.Requests.Waiting > 0 {
-			details = "Waiting for a connection slot  ·  " + downloadDetails(j, v.settings.DisplayUnit)
+			details = "Waiting for a connection slot  ·  " + playlistDetails(j) + downloadDetails(j, v.settings.DisplayUnit)
 		}
 		if j.Media != nil && j.State == "running" && j.MediaPhase != "download" {
-			details = j.Activity
+			details = playlistDetails(j) + j.Activity
 		}
 		box.Objects[1].(*widget.Label).SetText(details)
 		value, known := progressValue(j.Progress)
@@ -302,6 +304,16 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 			tabs.SelectIndex(0)
 			v.status.SetText("YouTube download added.")
 		}, finish)
+	}
+	v.youtube.submitPlaylist = func(batch string, jobs []queueEntry, finish func([]media.PlaylistResult, error)) {
+		v.workResult(func(q *queueClient) (desktopResponse, error) {
+			return callDesktop(q, desktopRequest{Operation: "playlist-add", Batch: batch, Jobs: jobs})
+		}, func(response desktopResponse) {
+			finish(response.PlaylistResults, nil)
+			v.filters.SetSelected("All downloads")
+			tabs.SelectIndex(0)
+			v.status.SetText("Playlist entries added. Retry only failed or selected entries using the usual controls.")
+		}, func(err error) { finish(nil, err) })
 	}
 	v.content = container.NewBorder(nil, container.NewPadded(container.NewBorder(nil, nil, nil, v.reconnect, v.status)), nil, nil, tabs)
 	categories.SetSelected("All downloads")
@@ -446,6 +458,17 @@ func (v *downloadsView) refresh() {
 		}
 	}
 	v.managementNote.SetText(note)
+	if len(v.playlists) > 0 {
+		completed, failed, pending, skipped, removed := 0, 0, 0, 0, 0
+		for _, p := range v.playlists {
+			completed += p.Completed
+			failed += p.Failed
+			pending += p.Pending
+			skipped += p.Skipped
+			removed += p.Removed
+		}
+		summary += fmt.Sprintf("\nPlaylists: %d completed · %d failed/canceled · %d pending · %d skipped · %d removed", completed, failed, pending, skipped, removed)
+	}
 	v.summary.SetText(summary)
 	v.actions()
 }
@@ -481,6 +504,7 @@ func (v *downloadsView) accept(response desktopResponse) {
 	}
 	v.revision = response.Revision
 	v.management = response.Management
+	v.playlists = response.Playlists
 	if v.settings.hardwareNote != nil {
 		v.settings.hardwareNote.SetText(hardwareDescription(response.Management))
 	}

@@ -25,6 +25,10 @@ import (
 type youtubeAnalyzer func(context.Context, string, networkproxy.Config, string) (media.Video, error)
 
 type youtubeView struct {
+	playlist                                            *youtubePlaylist
+	scope                                               *widget.Select
+	playlistLoader                                      func(context.Context, string, networkproxy.Config, string, int) (media.PlaylistPage, error)
+	submitPlaylist                                      func(string, []queueEntry, func([]media.PlaylistResult, error))
 	window                                              fyne.Window
 	settings                                            *speedSettings
 	content                                             fyne.CanvasObject
@@ -66,7 +70,7 @@ func analyzeYouTube(ctx context.Context, manifest string, route networkproxy.Con
 func newYouTubeView(w fyne.Window, settings *speedSettings, executable string) *youtubeView {
 	y := &youtubeView{window: w, settings: settings, analyzer: analyzeYouTube, dispatch: fyne.Do}
 	y.link = widget.NewEntry()
-	y.link.SetPlaceHolder("https://www.youtube.com/watch?v=… or https://youtu.be/…")
+	y.link.SetPlaceHolder("YouTube video, Shorts or playlist HTTPS link")
 	y.tools = widget.NewEntry()
 	manifest := os.Getenv("FLUXGET_MEDIA_TOOLS")
 	if manifest == "" {
@@ -96,7 +100,7 @@ func newYouTubeView(w fyne.Window, settings *speedSettings, executable string) *
 	y.status.Wrapping = fyne.TextWrapWord
 	y.proxyNote = widget.NewLabel(proxyDefaultDescription(settings.Proxy))
 	y.proxyNote.Wrapping = fyne.TextWrapWord
-	y.useProxy = widget.NewCheck("Use proxy for this video", nil)
+	y.useProxy = widget.NewCheck("Use proxy for this source", nil)
 	y.useProxy.SetChecked(settings.Proxy.Enabled)
 	y.title = widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	y.title.Wrapping = fyne.TextWrapWord
@@ -150,7 +154,14 @@ func newYouTubeView(w fyne.Window, settings *speedSettings, executable string) *
 	y.cancel = widget.NewButton("Cancel", y.cancelAnalysis)
 	y.cancel.Disable()
 	y.link.OnSubmitted = func(string) { y.startAnalysis() }
-	y.link.OnChanged = func(string) { y.invalidate() }
+	y.link.OnChanged = func(string) {
+		y.invalidate()
+		if _, err := media.NormalizeVideoURL(strings.TrimSpace(y.link.Text)); errors.Is(err, media.ErrPlaylist) {
+			y.scope.SetSelected("Choose from playlist")
+		} else {
+			y.scope.SetSelected("This video")
+		}
+	}
 	y.tools.OnChanged = func(string) { y.invalidate() }
 	y.useProxy.OnChanged = func(bool) { y.invalidate() }
 	y.kind.OnChanged = func(string) { y.populateContainers() }
@@ -162,32 +173,42 @@ func newYouTubeView(w fyne.Window, settings *speedSettings, executable string) *
 	y.filename.OnChanged = func(string) { y.updateDownloadEnabled() }
 	intro := widget.NewLabel("Explore video and audio formats from a public YouTube link. Analyze reads information without downloading media.")
 	intro.Wrapping = fyne.TextWrapWord
-	preview := widget.NewLabel("Download a single video or audio track. Playlists are coming later.")
+	preview := widget.NewLabel("Choose one video or selected playlist entries. Analysis does not start downloads.")
 	preview.Wrapping = fyne.TextWrapWord
 	toolNote := widget.NewLabel("This development preview needs the prepared media tools. Choose their tools.json manifest if they are not beside the app. Tool installation will be included in a later release.")
 	toolNote.Wrapping = fyne.TextWrapWord
 	advanced := widget.NewAccordion(widget.NewAccordionItem("Media tools — development preview", container.NewVBox(toolNote, widget.NewForm(widget.NewFormItem("Tools manifest", container.NewBorder(nil, nil, nil, y.browseTools, y.tools))))))
+	y.scope = widget.NewSelect([]string{"This video", "Choose from playlist"}, func(string) { y.invalidate() })
+	y.scope.SetSelected("This video")
+	y.playlist = newYouTubePlaylist(y)
+	y.playlistLoader = loadYouTubePlaylist
 	y.content = container.NewVScroll(container.NewPadded(container.NewVBox(intro, preview,
-		container.NewBorder(nil, nil, nil, container.NewHBox(y.analyze, y.cancel), y.link), container.NewBorder(nil, nil, y.useProxy, nil, y.proxyNote), advanced, y.spinner, y.status, y.options)))
+		container.NewBorder(nil, nil, nil, container.NewHBox(y.analyze, y.cancel), y.link), widget.NewForm(widget.NewFormItem("Source selection", y.scope)), container.NewBorder(nil, nil, y.useProxy, nil, y.proxyNote), advanced, y.spinner, y.status, y.options, y.playlist.content)))
 	return y
 }
 
 func (y *youtubeView) invalidate() {
-	if y.busy || y.closed {
+	if y.busy || y.closed || y.submitting {
 		return
 	}
 	if y.video.ID != "" {
 		y.status.SetText("The source or connection changed. Analyze again to refresh formats.")
 	}
 	y.video = media.Video{}
+	if y.playlist != nil {
+		y.playlist.reset()
+	}
 	y.options.Hide()
 	y.updateDownloadEnabled()
 }
 
 func (y *youtubeView) setBusy(busy bool) {
 	y.busy = busy
+	if y.playlist != nil {
+		y.playlist.setBusy(busy)
+	}
 	y.updateDownloadEnabled()
-	for _, object := range []fyne.Disableable{y.link, y.tools, y.useProxy, y.browseTools, y.analyze} {
+	for _, object := range []fyne.Disableable{y.link, y.tools, y.useProxy, y.browseTools, y.analyze, y.scope} {
 		if busy {
 			object.Disable()
 		} else {
@@ -206,14 +227,19 @@ func (y *youtubeView) setBusy(busy bool) {
 }
 
 func (y *youtubeView) startAnalysis() {
-	if y.busy || y.closed {
+	if y.busy || y.closed || y.submitting {
+		return
+	}
+	if y.scope.Selected == "Choose from playlist" {
+		y.playlist.reset()
+		y.playlist.load(1)
 		return
 	}
 	y.invalidate()
 	source, err := media.NormalizeVideoURL(strings.TrimSpace(y.link.Text))
 	if err != nil {
 		if errors.Is(err, media.ErrPlaylist) {
-			y.status.SetText("Playlist selection is coming later. Paste a single-video link instead.")
+			y.status.SetText("Choose from playlist to select entries from this link.")
 		} else {
 			y.status.SetText("Enter a public YouTube watch, youtu.be or Shorts HTTPS link.")
 		}
@@ -221,7 +247,7 @@ func (y *youtubeView) startAnalysis() {
 	}
 	route, err := proxyForDownload(y.settings.Proxy, y.useProxy.Checked)
 	if err != nil {
-		y.status.SetText("Set a valid proxy address in Settings, or turn off Use proxy for this video.")
+		y.status.SetText("Set a valid proxy address in Settings, or turn off Use proxy for this source.")
 		return
 	}
 	y.route = networkproxy.Config{}
@@ -434,6 +460,9 @@ func (y *youtubeView) selectionChanged() {
 
 func (y *youtubeView) updateDownloadEnabled() {
 	y.download.Disable()
+	if y.playlist != nil {
+		y.playlist.updateDownload()
+	}
 	if y.closed || y.busy || y.submitting || y.video.ID == "" || y.submit == nil || y.canDownload != nil && !y.canDownload() {
 		return
 	}

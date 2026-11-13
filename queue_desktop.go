@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Parsania80/FluxGet/internal/platformfile"
+	"github.com/Parsania80/FluxGet/media"
 	"github.com/Parsania80/FluxGet/networkproxy"
 	"os"
 	"path/filepath"
@@ -14,6 +15,8 @@ import (
 
 // Desktop requests are processed by the queue owner, never by transfer workers.
 type desktopRequest struct {
+	Batch        string         `json:"batch,omitempty"`
+	Jobs         []queueJob     `json:"jobs,omitempty"`
 	BrowserLater bool           `json:"browser_later,omitempty"`
 	ID           int            `json:"id"`
 	Operation    string         `json:"operation"`
@@ -32,13 +35,15 @@ type outputRemoval struct {
 }
 
 type desktopResponse struct {
-	BrowserStage string          `json:"browser_stage,omitempty"`
-	Revision     uint64          `json:"revision"`
-	ID           int             `json:"id"`
-	JobID        int             `json:"job_id,omitempty"`
-	Jobs         []desktopEntry  `json:"jobs,omitempty"`
-	Error        string          `json:"error,omitempty"`
-	Management   *budgetSnapshot `json:"management,omitempty"`
+	PlaylistResults []media.PlaylistResult  `json:"playlist_results,omitempty"`
+	Playlists       []media.PlaylistSummary `json:"playlists,omitempty"`
+	BrowserStage    string                  `json:"browser_stage,omitempty"`
+	Revision        uint64                  `json:"revision"`
+	ID              int                     `json:"id"`
+	JobID           int                     `json:"job_id,omitempty"`
+	Jobs            []desktopEntry          `json:"jobs,omitempty"`
+	Error           string                  `json:"error,omitempty"`
+	Management      *budgetSnapshot         `json:"management,omitempty"`
 }
 
 func backupQueue(path string) error {
@@ -182,7 +187,7 @@ func desktopAdd(q *queueData, input queueJob, adopt bool) (int, error) {
 		q.Version = max(q.Version, 4)
 	}
 	if input.Media != nil {
-		q.Version = 5
+		q.Version = max(q.Version, 5)
 	}
 	return input.ID, nil
 }

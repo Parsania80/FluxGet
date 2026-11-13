@@ -658,7 +658,19 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 								generation++
 							}
 						}
+					case "playlist-add":
+						if q.Version < 6 {
+							requestErr = backupQueueNamed(path, ".before-playlist")
+						}
+						if requestErr == nil {
+							response.PlaylistResults, requestErr = addPlaylist(&q, req.Batch, req.Jobs)
+							changed = requestErr == nil
+						}
 					case "add", "adopt":
+						if req.Job.Media != nil && req.Job.Media.Playlist != nil {
+							requestErr = errors.New("use playlist batch submission")
+							break
+						}
 						response.JobID, requestErr = desktopAdd(&q, req.Job, req.Operation == "adopt")
 						changed = requestErr == nil
 					case "published":
@@ -708,6 +720,7 @@ func runQueueClock(ctx context.Context, input io.Reader, output io.Writer, maxAc
 				if requestErr != nil {
 					response.Error = requestErr.Error()
 				}
+				response.Playlists = playlistSummaries(q)
 				response.Jobs = desktopEntries(q.Jobs, speeds, liveSegmentLayouts(layouts, progressWriters), clock())
 				management, jobRequests := budget.snapshot()
 				if management.Policy.Mode == "automatic" {

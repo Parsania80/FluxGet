@@ -189,3 +189,11 @@ func downloadDetails(j queueEntry, unit string) string {
 		return "Select the download for details"
 	}
 }
+
+func playlistDetails(j queueEntry) string {
+	if j.Media != nil && j.Media.Playlist != nil {
+		p := j.Media.Playlist
+		return fmt.Sprintf("%s · item %d · ", p.Title, p.Index)
+	}
+	return ""
+}

@@ -13,15 +13,15 @@ import (
 
 var (
 	ErrURL       = errors.New("expected a supported public YouTube video URL")
-	ErrPlaylist  = errors.New("playlist selection is not implemented in the stage-1 adapter")
+	ErrPlaylist  = errors.New("choose playlist selection for this URL")
 	ErrMetadata  = errors.New("invalid or unsupported media metadata")
 	ErrSelection = errors.New("requested media format is not available")
 	videoID      = regexp.MustCompile(`^[A-Za-z0-9_-]{11}$`)
 	formatID     = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 )
 
-// NormalizeVideoURL deliberately strips tracking and list parameters. A watch
-// URL with a list is one video here; full playlist selection belongs to stage 4.
+// NormalizeVideoURL deliberately strips tracking and list parameters. Playlist
+// enumeration requires a separate, explicit request.
 func NormalizeVideoURL(raw string) (string, error) {
 	if len(raw) > 8192 {
 		return "", ErrURL

@@ -40,10 +40,11 @@ type queueJob struct {
 	SavedProgress  *float64             `json:"saved_progress,omitempty"`
 }
 type queueData struct {
-	BrowserReceipts map[string]browserReceipt `json:"browser_receipts,omitempty"`
-	Version         int                       `json:"version"`
-	NextID          int                       `json:"next_id"`
-	Jobs            []queueJob                `json:"jobs"`
+	Playlists       map[string]playlistReceipt `json:"playlists,omitempty"`
+	BrowserReceipts map[string]browserReceipt  `json:"browser_receipts,omitempty"`
+	Version         int                        `json:"version"`
+	NextID          int                        `json:"next_id"`
+	Jobs            []queueJob                 `json:"jobs"`
 }
 
 func queuePath() (string, error) {
@@ -85,8 +86,11 @@ func loadQueue(path string) (queueData, error) {
 	if err = dec.Decode(&q); err != nil {
 		return q, err
 	}
-	if dec.Decode(new(any)) != io.EOF || q.Version < 1 || q.Version > 5 || q.NextID < 1 {
+	if dec.Decode(new(any)) != io.EOF || q.Version < 1 || q.Version > 6 || q.NextID < 1 {
 		return q, errors.New("invalid queue metadata")
+	}
+	if err := validatePlaylistReceipts(q); err != nil {
+		return q, err
 	}
 	ids := make(map[int]bool)
 	if len(q.BrowserReceipts) > 2048 || len(q.BrowserReceipts) > 0 && q.Version < 3 {
@@ -154,6 +158,12 @@ func loadQueue(path string) (queueData, error) {
 }
 
 func saveQueue(path string, q queueData) error {
+	if len(q.Playlists) > 0 {
+		q.Version = max(q.Version, 6)
+	}
+	if err := validatePlaylistReceipts(q); err != nil {
+		return err
+	}
 	if q.Version < 3 {
 		q.Version = 2
 	}

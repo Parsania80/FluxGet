@@ -86,6 +86,19 @@ func helper(args []string) {
 
 func fakeYTDLP(args []string) {
 	for _, a := range args {
+		if a == "--flat-playlist" {
+			joined := strings.Join(args, " ")
+			for _, want := range []string{"--yes-playlist", "--lazy-playlist", "--playlist-items 101:201", "--skip-download", "--proxy ", "--use-extractors youtube.*"} {
+				if !strings.Contains(joined, want) {
+					os.Exit(19)
+				}
+			}
+			fmt.Print(`{"_type":"playlist","id":"PLexample","title":"Fixture","entries":[{"id":"AAAAAAAAAAA","title":"Video","playlist_index":101}]}`)
+			return
+		}
+	}
+
+	for _, a := range args {
 		if a == "--dump-single-json" {
 			fmt.Println(fixtureMetadata)
 			return

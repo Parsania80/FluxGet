@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Parsania80/FluxGet/internal/platformcmd"
+	"github.com/Parsania80/FluxGet/media"
 	"io"
 	"strings"
 	"sync"
@@ -97,6 +98,8 @@ func startConfiguredQueue(executable string, maxActive, connections int, speedLi
 }
 
 type desktopRequest struct {
+	Batch        string         `json:"batch,omitempty"`
+	Jobs         []queueEntry   `json:"jobs,omitempty"`
 	BrowserLater bool           `json:"browser_later,omitempty"`
 	ID           int            `json:"id"`
 	Operation    string         `json:"operation"`
@@ -109,13 +112,15 @@ type desktopRequest struct {
 }
 
 type desktopResponse struct {
-	BrowserStage string          `json:"browser_stage,omitempty"`
-	Revision     uint64          `json:"revision"`
-	ID           int             `json:"id"`
-	JobID        int             `json:"job_id"`
-	Jobs         []queueEntry    `json:"jobs"`
-	Error        string          `json:"error"`
-	Management   *budgetSnapshot `json:"management,omitempty"`
+	PlaylistResults []media.PlaylistResult  `json:"playlist_results,omitempty"`
+	Playlists       []media.PlaylistSummary `json:"playlists,omitempty"`
+	BrowserStage    string                  `json:"browser_stage,omitempty"`
+	Revision        uint64                  `json:"revision"`
+	ID              int                     `json:"id"`
+	JobID           int                     `json:"job_id"`
+	Jobs            []queueEntry            `json:"jobs"`
+	Error           string                  `json:"error"`
+	Management      *budgetSnapshot         `json:"management,omitempty"`
 }
 
 func (q *queueClient) request(ctx context.Context, request desktopRequest) (desktopResponse, error) {
@@ -129,6 +134,9 @@ func (q *queueClient) request(ctx context.Context, request desktopRequest) (desk
 	data, err := json.Marshal(request)
 	if err != nil {
 		return desktopResponse{}, err
+	}
+	if len(data) > 900<<10 {
+		return desktopResponse{}, errors.New("playlist request is too large; submit fewer entries")
 	}
 	if err := q.send("desktop-json " + string(data)); err != nil {
 		return desktopResponse{}, err

@@ -8,10 +8,11 @@ import (
 // Job is the bounded, URL-free selection saved by the queue. Transfer URLs are
 // freshly resolved by yt-dlp; only the selected source formats are persisted.
 type Job struct {
-	Version   int       `json:"version"`
-	Manifest  string    `json:"manifest"`
-	Video     Video     `json:"video"`
-	Selection Selection `json:"selection"`
+	Playlist  *PlaylistPosition `json:"playlist,omitempty"`
+	Version   int               `json:"version"`
+	Manifest  string            `json:"manifest"`
+	Video     Video             `json:"video"`
+	Selection Selection         `json:"selection"`
 }
 
 func NewJob(video Video, selection Selection, manifest string) (Job, error) {
@@ -26,6 +27,9 @@ func NewJob(video Video, selection Selection, manifest string) (Job, error) {
 }
 
 func (j Job) Validate() error {
+	if j.Playlist != nil && j.Playlist.Validate() != nil {
+		return ErrMetadata
+	}
 	if j.Version != 1 || !filepath.IsAbs(j.Manifest) || len(j.Manifest) > 4096 || !videoID.MatchString(j.Video.ID) || len(j.Video.Title) > 4096 || j.Video.Duration <= 0 || math.IsNaN(j.Video.Duration) || math.IsInf(j.Video.Duration, 0) || len(j.Video.Formats) < 1 || len(j.Video.Formats) > 2 {
 		return ErrMetadata
 	}

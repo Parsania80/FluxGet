@@ -156,16 +156,20 @@ func TestYouTubeAnalysisSnapshotsProxyAndOnlyOneVideo(t *testing.T) {
 	if submitted.Proxy == nil || submitted.Proxy.URL != "socks5h://127.0.0.1:10808" {
 		t.Fatal("download silently changed its captured route")
 	}
+
+	y.useProxy.SetChecked(false)
+	playlistCalls := 0
+	y.playlistLoader = func(context.Context, string, networkproxy.Config, string, int) (media.PlaylistPage, error) {
+		playlistCalls++
+		return media.PlaylistPage{ID: "PLexample", Title: "Playlist", First: 1}, nil
+	}
 	y.link.SetText("https://www.youtube.com/playlist?list=PLexample")
 	test.Tap(y.analyze)
-	if y.busy || !strings.Contains(y.status.Text, "Playlist selection is coming later") {
-		t.Fatal("playlist-only URL was silently analyzed as one video")
+	finishYouTubeAnalysis(t, queue)
+	if y.scope.Selected != "Choose from playlist" || playlistCalls != 1 || y.video.ID != "" || !y.playlist.content.Visible() {
+		t.Fatal("playlist-only URL did not use explicit playlist intake")
 	}
-	select {
-	case <-got:
-		t.Fatal("unsupported playlist reached analyzer")
-	default:
-	}
+
 }
 
 func TestYouTubeCancelAndCloseWaitForAnalysisReaping(t *testing.T) {
