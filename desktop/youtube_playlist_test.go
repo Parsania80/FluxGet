@@ -5,6 +5,7 @@ import (
 	"errors"
 	"image/png"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -202,7 +203,7 @@ func TestYouTubePlaylistCanceledLateSuccessIsDiscarded(t *testing.T) {
 }
 func TestYouTubePlaylistScreenshotAndDownloadsSummary(t *testing.T) {
 	y, queue := youtubeTestView(t)
-	v := newDownloadsView(fyne.CurrentApp(), y.window, y.settings, nil, "/fixture/fluxget")
+	v := newDownloadsView(fyne.CurrentApp(), y.window, y.settings, nil, filepath.Join(t.TempDir(), "fluxget"))
 	y = v.youtube
 	y.dispatch = func(fn func()) { queue <- fn }
 	loadPlaylistFixture(t, y, queue)
