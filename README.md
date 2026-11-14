@@ -6,7 +6,7 @@ FluxGet is a download manager written in Go. It helps you manage several downloa
 
 **[Version 1.0.0 is available for Linux and Windows (64-bit Intel/AMD).](https://github.com/Parsania80/FluxGet/releases/tag/v1.0.0)** Native checks and installer verification passed on both operating systems. Version tags publish packages after native checks pass. Release-preparation pull requests also build and test installers without publishing them. Windows browser capture and other Linux distributions still need hands-on testing. macOS is not included.
 
-**Preparing v2.0.0:** YouTube videos and playlists, per-download proxy routing, and automatic file-type folders. YouTube has an in-app first-use tool setup; internet access and about 700 MB of free space are required. The folder feature passed Windows CI and was merged into `main`. The native first-use setup passed on Linux, including pinned versions/EJS, MP4 merge and MP3 conversion. Both installed packages must pass release verification before v2.0.0 is published. See the [roadmap](project.md#youtube-videos-and-playlists--next-release-plan).
+**[Version 2.0.0](https://github.com/Parsania80/FluxGet/releases/tag/v2.0.0)** introduced YouTube videos and playlists, per-download proxy routing, and automatic file-type folders. Version 2.0.1 adds guided browser setup, a first-use YouTube tools prompt, and a saved appearance choice. The [releases page](https://github.com/Parsania80/FluxGet/releases) lists published Windows and Linux installers.
 
 ## What you can do
 

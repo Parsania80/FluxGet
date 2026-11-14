@@ -385,3 +385,5 @@
 
 [2026-11-14 21:18] [OPERATOR] Requested committing and pushing the current work to master, merging that branch into the v2.0.0 release branch, and releasing v2.0.1.
 [2026-11-14 21:18] [AGENT] Verified origin uses main as the default branch and release-v2.0.0 as the release branch. Prepared the reviewed improvements on main and preserved the published v2.0.0 tag.
+
+[2026-11-14 21:20] [AGENT] Pushed main commit 1a251a7 through GitHub Desktop and verified the remote ref. Fast-forwarded release-v2.0.0 to main and aligned application and browser manifest versions and release notes for v2.0.1.

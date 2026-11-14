@@ -1,3 +1,15 @@
+# FluxGet 2.0.1
+
+- **Browser setup.** The setup guide shows where to load the bundled extension. Copy the folder path into the browser's file picker, or open it in Explorer on Windows or the file manager on Linux. Connected profile changes show up in FluxGet, and disconnected profiles can reconnect from the extension popup.
+- **YouTube setup.** When tools are missing, choose **Install** to set them up and continue analyzing the same link, or **Later** to defer installation.
+- **Appearance.** Choose **Light**, **Dark**, or **Follow system** in **Settings → General** and save your preference.
+
+Close FluxGet before upgrading. On Windows, run `fluxget-2.0.1-windows-amd64-setup.exe`. On Debian or Ubuntu, run `sudo apt install ./fluxget_2.0.1_amd64.deb`. If you already loaded the Chrome extension from the installed folder, reload it at `chrome://extensions`.
+
+Earlier versions and their release notes are available on the [releases page](https://github.com/Parsania80/FluxGet/releases).
+
+---
+
 # FluxGet 2.0.0
 
 YouTube downloads, optional proxy routing and automatic download folders for Linux and Windows on 64-bit Intel/AMD computers.
