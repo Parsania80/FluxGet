@@ -8,6 +8,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -34,7 +35,7 @@ func TestDisplayUnitsFormatSizesAndSpeeds(t *testing.T) {
 }
 
 func TestDisplayUnitMigrationAndValidation(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	setTestConfig(t, t.TempDir())
 	s, err := loadSpeedSettings()
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +48,7 @@ func TestDisplayUnitMigrationAndValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	s, err = loadSpeedSettings()
-	if err != nil || s.DisplayUnit != "MB" || s.Default != 512 || s.Overrides["queue:1"] != 128 {
+	if err != nil || s.DisplayUnit != "MB" || s.Appearance != appearanceSystem || s.Default != 512 || s.Overrides["queue:1"] != 128 {
 		t.Fatalf("legacy settings: %+v %v", s, err)
 	}
 	if err := os.WriteFile(s.path, []byte(`{"display_unit":"TB"}`), 0600); err != nil {
@@ -121,6 +122,7 @@ func TestSettingsUnitSelectorPersistsWithoutChangingLimits(t *testing.T) {
 	page := s.page(w, func() { saved++ }, func() bool { return true }, nil)
 	w.SetContent(page)
 	var selectUnit *widget.Select
+	var selectAppearance *widget.Select
 	var sortFiles *widget.Check
 	var save *widget.Button
 	var walk func(fyne.CanvasObject)
@@ -140,6 +142,9 @@ func TestSettingsUnitSelectorPersistsWithoutChangingLimits(t *testing.T) {
 			}
 		case *widget.Form:
 			for _, item := range o.Items {
+				if item.Text == "Appearance" {
+					selectAppearance, _ = item.Widget.(*widget.Select)
+				}
 				walk(item.Widget)
 			}
 		case *widget.Select:
@@ -160,12 +165,17 @@ func TestSettingsUnitSelectorPersistsWithoutChangingLimits(t *testing.T) {
 	if selectUnit == nil || save == nil || selectUnit.Selected != "MB" || sortFiles == nil || !sortFiles.Checked {
 		t.Fatal("missing default MB unit selector")
 	}
-	for _, unit := range []string{"GB", "KB", "MB"} {
+	if selectAppearance == nil || selectAppearance.Selected != appearanceSystem {
+		t.Fatal("missing Follow system default")
+	}
+	for i, unit := range []string{"GB", "KB", "MB"} {
+		appearance := []string{appearanceDark, appearanceLight, appearanceSystem}[i]
 		selectUnit.SetSelected(unit)
+		selectAppearance.SetSelected(appearance)
 		test.Tap(sortFiles)
 		test.Tap(save)
 		loaded, err := loadSpeedSettings()
-		if err != nil || loaded.SortFiles != sortFiles.Checked || loaded.DisplayUnit != unit || loaded.Default != 512 || loaded.Overall != 2048 || loaded.Overrides["queue:1"] != 128 {
+		if err != nil || loaded.SortFiles != sortFiles.Checked || loaded.DisplayUnit != unit || loaded.Appearance != appearance || loaded.Default != 512 || loaded.Overall != 2048 || loaded.Overrides["queue:1"] != 128 {
 			t.Fatalf("saving %s changed limits: %+v %v", unit, loaded, err)
 		}
 	}
@@ -174,5 +184,28 @@ func TestSettingsUnitSelectorPersistsWithoutChangingLimits(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(s.path), "desktop-speed.json")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAppearancePalette(t *testing.T) {
+	a := test.NewApp()
+	defer a.Quit()
+	base := theme.DefaultTheme()
+	for _, tc := range []struct {
+		appearance string
+		system     fyne.ThemeVariant
+		want       fyne.ThemeVariant
+	}{
+		{appearanceLight, theme.VariantDark, theme.VariantLight},
+		{appearanceDark, theme.VariantLight, theme.VariantDark},
+		{appearanceSystem, theme.VariantLight, theme.VariantLight},
+		{appearanceSystem, theme.VariantDark, theme.VariantDark},
+	} {
+		applyAppearance(a, tc.appearance)
+		for _, role := range []fyne.ThemeColorName{theme.ColorNameBackground, theme.ColorNameForeground, theme.ColorNameInputBackground} {
+			if got, want := a.Settings().Theme().Color(role, tc.system), base.Color(role, tc.want); got != want {
+				t.Errorf("%s on system variant %d uses %v for %s, want %v", tc.appearance, tc.system, got, role, want)
+			}
+		}
 	}
 }

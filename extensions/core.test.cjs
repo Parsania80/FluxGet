@@ -203,7 +203,7 @@ test('concurrent startup requests share one persistent profile identity', async 
   const result = await vm.runInContext('Promise.all([identity(),identity(),identity()])', context);
   assert.equal(new Set(result).size, 1); assert.equal(generated, 1); assert.equal(saved, 1);
 });
-function popupFixture({ mode = 'ask', access = 'none', consent = true, approved = true } = {}) {
+function popupFixture({ mode = 'ask', access = 'none', consent = true, approved = true, connected, integration = true } = {}) {
   const vm = require('node:vm'), fs = require('node:fs'), elements = new Map(), calls = [];
   const document = { getElementById: id => {
     if (!elements.has(id)) elements.set(id, { textContent: '', hidden: false, addEventListener(event, fn) { this[event] = fn; } });
@@ -211,8 +211,11 @@ function popupFixture({ mode = 'ask', access = 'none', consent = true, approved 
   } };
   const chrome = { runtime: { sendMessage: async message => {
     calls.push(message.action);
-    if (message.action === 'profile') consent = message.consent;
-    return message.action === 'status' ? { consent, remote: { ok: true, enabled: consent, mode }, pending: 0 } : { ok: true };
+    if (message.action === 'profile') {
+      consent = message.consent;
+      if (connected !== undefined) connected = consent;
+    }
+    return message.action === 'status' ? { consent, remote: { ok: true, enabled: integration && (connected ?? consent), connected, mode }, pending: 0 } : { ok: true };
   } }, permissions: {
     getAll: async () => ({ permissions: access === 'none' ? [] : ['webRequest', 'scripting'], origins: access === 'all' ? ['http://*/*', 'https://*/*'] : access === 'limited' ? ['https://files.example.org/*'] : [] }),
     contains: async value => { assert.deepEqual(JSON.parse(JSON.stringify(value)), { permissions: ['webRequest', 'scripting'], origins: ['http://*/*', 'https://*/*'] }); return access === 'all'; },
@@ -223,6 +226,16 @@ function popupFixture({ mode = 'ask', access = 'none', consent = true, approved 
   vm.runInContext(fs.readFileSync(require.resolve('./src/popup.js'), 'utf8'), context);
   return { elements, calls, ready: () => vm.runInContext('refresh()', context) };
 }
+test('popup reflects desktop disconnection and lets the user reconnect', async () => {
+  const f = popupFixture({ mode: 'manual', consent: true, connected: false }); await f.ready();
+  assert.equal(f.elements.get('enabled').checked, false);
+  assert.match(f.elements.get('status').textContent, /connect to FluxGet/);
+  f.elements.get('enabled').checked = true; await f.elements.get('enabled').change();
+  assert.equal(f.elements.get('enabled').checked, true);
+  const paused = popupFixture({ connected: true, integration: false }); await paused.ready();
+  assert.equal(paused.elements.get('enabled').checked, true);
+  assert.match(paused.elements.get('status').textContent, /Profile connected/);
+});
 test('popup distinguishes all-site access, limited access and missing permission', async () => {
   for (const mode of ['ask', 'automatic', 'manual']) {
     for (const access of ['none', 'limited', 'all']) {

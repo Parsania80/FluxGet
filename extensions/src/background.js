@@ -148,7 +148,11 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     if (message.action === "status") {
       const local = await api.storage.local.get(["consent", "lastMessage", "pauseUntil"]);
-      let remote; try { remote = await native({ operation: "policy" }); } catch { remote = { ok: false, error: "Open FluxGet and test the native connection" }; }
+      let remote;
+      try {
+        remote = await native({ operation: "profile-status" });
+        if (!remote.ok && remote.error === "unknown browser operation") remote = await native({ operation: "policy" });
+      } catch { remote = { ok: false, error: "Open FluxGet and test the native connection" }; }
       return { ...local, remote, pending: (await records()).length };
     }
     if (message.action === "profile") {

@@ -50,7 +50,7 @@ with tempfile.TemporaryDirectory(prefix='fluxget-deb-') as temp:
     installed_size = (sum(f.stat().st_size for f in package.rglob('*') if f.is_file() and not f.is_symlink()) + 1023) // 1024
     control = package / 'DEBIAN/control'
     control.parent.mkdir()
-    dependencies = 'libc6 (>= 2.35), libgl1, libx11-6, libxrandr2, libxxf86vm1, libxi6, libxcursor1, libxinerama1, libwayland-client0, libwayland-cursor0, libwayland-egl1, libxkbcommon0, tar, xz-utils, ca-certificates'
+    dependencies = 'libc6 (>= 2.35), libgl1, libx11-6, libxrandr2, libxxf86vm1, libxi6, libxcursor1, libxinerama1, libwayland-client0, libwayland-cursor0, libwayland-egl1, libxkbcommon0, tar, xz-utils, ca-certificates, xdg-utils'
     control.write_text(f'''Package: fluxget
 Version: {version}
 Section: net

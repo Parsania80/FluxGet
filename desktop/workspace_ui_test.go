@@ -28,7 +28,7 @@ func TestDesktopWorkspacesKeepActionsVisibleAndDraftsIntact(t *testing.T) {
 		t.Run(screen.name, func(t *testing.T) {
 			setTestConfig(t, t.TempDir())
 			a := test.NewApp()
-			a.Settings().SetTheme(fluxTheme{screen.theme})
+			a.Settings().SetTheme(fluxTheme{Theme: screen.theme})
 			defer a.Quit()
 			w := a.NewWindow("FluxGet")
 			defer w.Close()

@@ -73,7 +73,9 @@ func TestQueryLinksPreservedAndDiagnosticsRedacted(t *testing.T) {
 	}
 }
 func TestPolicyConsentAndPersistence(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	config := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", config)
+	t.Setenv("APPDATA", config)
 	s, err := OpenStore()
 	if err != nil {
 		t.Fatal(err)
@@ -107,9 +109,16 @@ func TestPolicyConsentAndPersistence(t *testing.T) {
 		case "wrong-browser":
 			p.Profiles[r.Profile] = Profile{Browser: "firefox", Enabled: true}
 		}
-		if p.Allowed(r) {
-			t.Fatal("restriction ignored", kind)
+		status := r
+		status.Operation = "profile-status"
+		reply := p.Reply(status)
+		connected := kind == "master" || kind == "browser"
+		if reply.Enabled || reply.Connected == nil || *reply.Connected != connected {
+			t.Fatal("incorrect profile or capture state", kind, reply)
 		}
+	}
+	if reply := s.Snapshot().Reply(r); reply.Connected != nil {
+		t.Fatal("legacy replies must not include new fields")
 	}
 	// A failed save must not change the accepted in-memory policy.
 	dir := t.TempDir()

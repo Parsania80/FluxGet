@@ -10,6 +10,8 @@ This file describes current decisions and remaining work. [README.md](README.md)
 
 Keep these priorities while continuing engine release verification alongside product development.
 
+**2026-11-14 follow-up:** `main` contains the v2.0.0 tag and release merge. The working tree adds guided browser setup, visible profile refresh and disconnection, and a YouTube tools installer prompt. It also moves the engine and its tests into `internal/engine/`. Live browser handoff and Linux desktop acceptance remain open for these changes.
+
 | # | Task | Status | Notes |
 |---|------|--------|-------|
 | 1 | CLI and desktop prototype baseline | ✅ Done | Sequential/parallel downloads, persistent queue, recovery, progress, and live limits |
@@ -93,13 +95,11 @@ Settings are saved only after scheduler acknowledgment; a settings-write failure
 
 | Source area | Responsibility |
 |---|---|
-| `main.go`, `destination.go` | CLI input, cancellation, safe filename/destination selection |
-| `download.go`, `parallel.go`, `transfer_policy.go` | Sequential/range requests, validation, timeouts, retries |
-| `resume.go`, `remote_validation.go`, `reconcile.go` | Local/remote verification and publication recovery |
-| `checkpoint.go`, `jobs.go`, `job_lock_*.go`, `partial_identity_*.go` | Versioned recovery records, identity, exclusive ownership |
-| `queue*.go`, `cleanup*.go` | Persistent queue, desktop protocol, transitions, deletion, snapshots; queue_playlist.go owns atomic batch admission and replay receipts |
-| `adaptive.go`, `automatic_queue.go`, `request_budget.go`, `worker_control.go` | Pure policy, live coordination, request leases, safe worker targets |
-| `measurements.go`, `hardware*.go`, `resource_guard.go`, `storage_observations*.go`, `transfer_buffers.go` | Runtime observations and resource controls |
+| `main.go` | Root executable entry point for `go build .` |
+| `internal/engine/cli.go`, `destination.go` | CLI input, cancellation, safe filename/destination selection |
+| `internal/engine/` transfer, recovery and platform files | Sequential/range requests, validation, retries, versioned checkpoints, identity and exclusive ownership |
+| `internal/engine/queue*.go`, `cleanup*.go` | Persistent queue, desktop protocol, transitions, deletion and snapshots. `queue_playlist.go` owns atomic batch admission and replay receipts. |
+| `internal/engine/` scheduling, budget and observation files | Automatic policy, live worker coordination, request leases and resource observations |
 | `desktop/` | Fyne Downloads/YouTube/Settings, companion client, migration, units, history, batch controls; youtube.go handles metadata lifecycle and queue submission; youtube_selection.go handles selection and destination validation; youtube_playlist.go handles paged selection and per-item preparation |
 | `desktop/assets/`, `packaging/linux/` | Embedded app icon and Linux launcher template |
 | `.github/workflows/ci.yml`, `release.yml` | CI plus native Linux/Windows release checks, packaging, checksums and joint publication |
@@ -107,7 +107,7 @@ Settings are saved only after scheduler acknowledgment; a settings-write failure
 | `internal/downloadcategory/` | Shared final-filename classification and safe category-directory creation for CLI, queue and desktop media |
 | `packaging/build_release.py`, `packaging/windows/`, `packaging/linux/` | Paired .deb/.exe installers, app icon, system Linux/per-user Windows install/uninstall; no browser permission changes |
 
-The engine currently lives in the root `main` package. A future `cmd/` and `internal/` split is optional, not implemented architecture. The browser preview uses `browserbridge/`, `cmd/fluxget-native-host/`, `extensions/`, and the two Python packaging helpers; these do not restructure the transfer engine.
+The engine and its package tests live in `internal/engine/`. The root CLI delegates to this package, preserving the existing build and packaging commands. Keeping transfer and queue internals together preserves the current ownership boundaries. Browser integration uses `browserbridge/`, `cmd/fluxget-native-host/`, `extensions/`, and the packaging helpers. The desktop setup guide uses embedded PowerShell and POSIX scripts to open packaged extension folders, with `xdg-utils` declared by the Debian package.
 
 ## Current behavior and correctness contracts
 

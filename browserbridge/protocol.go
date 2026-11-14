@@ -50,14 +50,15 @@ type Request struct {
 	Proof     *Proof `json:"proof,omitempty"`
 }
 type Response struct {
-	Version  int    `json:"version"`
-	OK       bool   `json:"ok"`
-	Error    string `json:"error,omitempty"`
-	Enabled  bool   `json:"enabled"`
-	Mode     string `json:"mode,omitempty"`
-	Stage    string `json:"stage,omitempty"`
-	JobID    int    `json:"job_id,omitempty"`
-	Filename string `json:"filename,omitempty"`
+	Version   int    `json:"version"`
+	OK        bool   `json:"ok"`
+	Error     string `json:"error,omitempty"`
+	Enabled   bool   `json:"enabled"`
+	Connected *bool  `json:"connected,omitempty"`
+	Mode      string `json:"mode,omitempty"`
+	Stage     string `json:"stage,omitempty"`
+	JobID     int    `json:"job_id,omitempty"`
+	Filename  string `json:"filename,omitempty"`
 }
 
 // Diagnostics omit complete URLs: queries and paths can carry access tokens.
@@ -72,7 +73,7 @@ func Validate(r Request) error {
 		return errors.New("unsupported protocol or browser profile")
 	}
 	switch r.Operation {
-	case "policy", "profile":
+	case "policy", "profile", "profile-status":
 		return nil
 	case "prepare", "activate", "abort", "status":
 	default:

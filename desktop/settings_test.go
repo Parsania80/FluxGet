@@ -92,7 +92,7 @@ func TestRemoveLimitButtonTracksReusedRow(t *testing.T) {
 }
 
 func TestCustomLimitTogglePersistsWithoutMagicZero(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	setTestConfig(t, t.TempDir())
 	a := test.NewApp()
 	defer a.Quit()
 	w := a.NewWindow("limits")

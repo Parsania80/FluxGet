@@ -235,6 +235,10 @@ func newYouTubeView(w fyne.Window, settings *speedSettings, executable string) *
 }
 
 func (y *youtubeView) installTools() {
+	y.installToolsThen(nil)
+}
+
+func (y *youtubeView) installToolsThen(afterInstall func()) {
 	if y.busy || y.closed || y.submitting {
 		return
 	}
@@ -279,8 +283,32 @@ func (y *youtubeView) installTools() {
 			}
 			y.tools.SetText(manifest)
 			y.status.SetText("YouTube tools are ready. Paste a video or playlist link and choose Analyze.")
+			if afterInstall != nil {
+				afterInstall()
+			}
 		})
 	}()
+}
+
+func (y *youtubeView) promptToInstallTools() {
+	y.status.SetText("Media tools are missing or invalid. Install them to download from YouTube.")
+	note := widget.NewLabel("FluxGet needs yt-dlp and its companion tools to read YouTube links and save video or audio. Installation needs internet access and about 700 MB of free space.")
+	note.Wrapping = fyne.TextWrapWord
+	prompt := dialog.NewCustomConfirm("Install YouTube tools?", "Install", "Later", note, func(install bool) {
+		if install {
+			y.installToolsThen(y.startAnalysis)
+		}
+	}, y.window)
+	prompt.Resize(fyne.NewSize(500, 220))
+	prompt.Show()
+}
+
+func (y *youtubeView) showAnalysisError(err error) {
+	if errors.Is(err, media.ErrTools) {
+		y.promptToInstallTools()
+		return
+	}
+	y.status.SetText(youtubeAnalysisError(err))
 }
 
 func (y *youtubeView) invalidate() {
@@ -353,7 +381,7 @@ func (y *youtubeView) startAnalysis() {
 	}
 	manifest := strings.TrimSpace(y.tools.Text)
 	if !filepath.IsAbs(manifest) {
-		y.status.SetText("Open Media tools and choose an absolute tools.json path.")
+		y.promptToInstallTools()
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -383,7 +411,7 @@ func (y *youtubeView) startAnalysis() {
 				return
 			}
 			if err != nil {
-				y.status.SetText(youtubeAnalysisError(err))
+				y.showAnalysisError(err)
 				return
 			}
 			y.video = video
@@ -407,8 +435,6 @@ func youtubeAnalysisError(err error) string {
 		return "Analysis canceled. No media was downloaded."
 	case errors.Is(err, context.DeadlineExceeded):
 		return "Analysis timed out. Check your connection or proxy and try again."
-	case errors.Is(err, media.ErrTools):
-		return "Media tools are missing or invalid. Open Media tools and select Set up YouTube tools, or choose an existing tools.json manifest."
 	case errors.Is(err, media.ErrMetadata):
 		return "This video has no supported public formats. Live, private and login-required sources are not supported."
 	default:

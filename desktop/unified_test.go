@@ -219,7 +219,7 @@ func TestUnifiedServerNameConflictRetargetAndRestart(t *testing.T) {
 
 func TestUnifiedViewFiltersActionsAndLayout(t *testing.T) {
 	a := test.NewApp()
-	a.Settings().SetTheme(fluxTheme{theme.DefaultTheme()})
+	a.Settings().SetTheme(fluxTheme{Theme: theme.DefaultTheme()})
 	defer a.Quit()
 	w := a.NewWindow("FluxGet")
 	settings := &speedSettings{MaxActive: 2, Connections: 4, Overrides: map[string]int64{"queue:1": 1024}}

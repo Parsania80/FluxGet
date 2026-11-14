@@ -24,19 +24,32 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-type fluxTheme struct{ fyne.Theme }
+type fluxTheme struct {
+	fyne.Theme
+	appearance string
+}
 
 func (t fluxTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
 	if name == theme.ColorNamePrimary {
 		return color.NRGBA{R: 0, G: 125, B: 111, A: 255}
 	}
+	switch t.appearance {
+	case appearanceLight:
+		variant = theme.VariantLight
+	case appearanceDark:
+		variant = theme.VariantDark
+	}
 	return t.Theme.Color(name, variant)
+}
+
+func applyAppearance(a fyne.App, appearance string) {
+	a.Settings().SetTheme(fluxTheme{Theme: theme.DefaultTheme(), appearance: appearance})
 }
 
 func main() {
 	a := app.NewWithID(applicationID)
 	a.SetIcon(appIcon)
-	a.Settings().SetTheme(fluxTheme{theme.DefaultTheme()})
+	applyAppearance(a, appearanceSystem)
 	w := a.NewWindow("FluxGet " + buildinfo.Version())
 	w.SetIcon(appIcon)
 	w.Resize(fyne.NewSize(1100, 720))
@@ -58,6 +71,9 @@ func main() {
 		w.SetContent(widget.NewLabel("Cannot open settings: " + err.Error()))
 		w.ShowAndRun()
 		return
+	}
+	if settings.Appearance != appearanceSystem {
+		applyAppearance(a, settings.Appearance)
 	}
 	history, discoveryErr := discoverSavedJobs(history)
 	executable, err := cliPath()
@@ -288,7 +304,12 @@ func newDownloadsView(a fyne.App, w fyne.Window, settings *speedSettings, histor
 	downloads := container.NewBorder(top, container.NewVBox(widget.NewSeparator(), selectionBar), nil, nil, split)
 	settings.applyDownloads = v.applySettings
 	v.youtube = newYouTubeView(w, settings, executable)
+	appearance := settings.Appearance
 	settingsPage := settings.page(w, func() {
+		if settings.Appearance != appearance {
+			appearance = settings.Appearance
+			applyAppearance(a, appearance)
+		}
 		v.refresh()
 		if !v.youtube.busy && !v.youtube.submitting {
 			v.youtube.sortFiles.SetChecked(settings.SortFiles)

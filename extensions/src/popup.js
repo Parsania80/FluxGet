@@ -10,9 +10,11 @@ async function allowAllWebsites() {
 }
 async function refresh() {
   try {
-    const result = await command("status"); $("enabled").checked = result.consent === true;
+    const result = await command("status");
+    const connected = result.remote.connected ?? (result.consent === true);
+    $("enabled").checked = connected;
     captureMode = result.remote.mode;
-    $("status").textContent = !result.remote.ok ? result.remote.error : result.remote.enabled ? `Connected · ${result.remote.mode === "automatic" ? "Automatic capture" : result.remote.mode === "manual" ? "Manual sending" : "Ask first"}` : "Connected · Disabled in FluxGet or this profile";
+    $("status").textContent = !result.remote.ok ? result.remote.error : result.remote.enabled ? `Connected · ${result.remote.mode === "automatic" ? "Automatic capture" : result.remote.mode === "manual" ? "Manual sending" : "Ask first"}` : connected ? "Profile connected. Enable this browser in FluxGet settings." : "Turn on Enable this browser profile to connect to FluxGet.";
     const grants = await api.permissions.getAll();
     const hasSites = grants.permissions?.includes("webRequest") && grants.origins?.some(origin => /^https?:\/\//.test(origin) || origin === "<all_urls>");
     const allSites = await api.permissions.contains(CAPTURE_ACCESS);

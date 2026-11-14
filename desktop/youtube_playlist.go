@@ -314,7 +314,7 @@ func (p *youtubePlaylist) load(first int) {
 	}
 	manifest := strings.TrimSpace(y.tools.Text)
 	if !filepath.IsAbs(manifest) {
-		y.status.SetText("Choose an absolute tools.json path in Media tools.")
+		y.promptToInstallTools()
 		return
 	}
 	capturedRoute := networkproxy.Config{}
@@ -345,7 +345,7 @@ func (p *youtubePlaylist) load(first int) {
 				return
 			}
 			if err != nil {
-				y.status.SetText(youtubeAnalysisError(err))
+				y.showAnalysisError(err)
 				return
 			}
 			if p.page.ID != "" && p.page.ID != page.ID {
@@ -434,6 +434,7 @@ func (p *youtubePlaylist) resolve() {
 	go func() {
 		jobs := make([]queueEntry, 0, len(choices))
 		known, total := true, int64(0)
+		var toolsErr error
 		for i := range choices {
 			if ctx.Err() != nil {
 				break
@@ -446,6 +447,10 @@ func (p *youtubePlaylist) resolve() {
 				}
 			})
 			video, err := analyze(ctx, manifest, route, "https://www.youtube.com/watch?v="+choice.entry.ID)
+			if errors.Is(err, media.ErrTools) {
+				toolsErr = err
+				break
+			}
 			selection := media.Selection{Container: strings.ToLower(format)}
 			var lower bool
 			if err == nil && video.ID != choice.entry.ID {
@@ -514,6 +519,9 @@ func (p *youtubePlaylist) resolve() {
 			jobs = append(jobs, job)
 		}
 		err := ctx.Err()
+		if err == nil {
+			err = toolsErr
+		}
 		cancel()
 		dispatch(func() {
 			if !p.finish() {
@@ -521,7 +529,7 @@ func (p *youtubePlaylist) resolve() {
 			}
 			if err != nil {
 				p.invalidate()
-				y.status.SetText(youtubeAnalysisError(err))
+				y.showAnalysisError(err)
 				return
 			}
 			for _, choice := range choices {

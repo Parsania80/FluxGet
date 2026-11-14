@@ -15,7 +15,7 @@ These measurements describe one local experiment, not a performance guarantee or
 Reproduce on Linux with sufficient free temporary space:
 
 ```bash
-go test -run '^$' -bench '^BenchmarkRecorded(Workload|Cancellation)$' -benchtime=1x -count=5 -v
+go test -run '^$' -bench '^BenchmarkRecorded(Workload|Cancellation)$' -benchtime=1x -count=5 -v ./internal/engine
 ```
 
 ## Results
@@ -50,7 +50,7 @@ Queue time starts before the six `add` commands and ends when polling observes a
 Reproduce on Linux, choosing a writable directory on the filesystem to measure:
 
 ```bash
-TMPDIR=/tmp FLUXGET_WORKLOAD_STORAGE_DIR="$PWD" go test -run '^$' -bench '^BenchmarkRecordedQueueWorkload$' -benchtime=1x -count=3 -v
+TMPDIR=/tmp FLUXGET_WORKLOAD_STORAGE_DIR="$PWD" go test -run '^$' -bench '^BenchmarkRecordedQueueWorkload$' -benchtime=1x -count=3 -v ./internal/engine
 ```
 
 The benchmark creates and removes uniquely named temporary directories in that directory. Confirm that `/tmp` is tmpfs and the chosen directory is on the intended filesystem before comparing them.
@@ -87,7 +87,7 @@ CPU is the before/after `RUSAGE_CHILDREN` user+system time for reaped children, 
 Reproduce using an explicitly prepared pinned tool manifest:
 
 ```bash
-FLUXGET_MEDIA_TOOLS="$PWD/dist/install-current/media-tools/tools.json" go test -count=3 -v -run '^TestMediaQueueNativeMixedSharedCeiling$' .
+FLUXGET_MEDIA_TOOLS="$PWD/dist/install-current/media-tools/tools.json" go test -count=3 -v -run '^TestMediaQueueNativeMixedSharedCeiling$' ./internal/engine
 ```
 
 The other stage-5 native tests cover interrupted FFmpeg merge/MP3 conversion, refreshed links, a real private 1 MiB tmpfs ENOSPC failure/recovery, atomic metadata-save failure and completed-part HTTP 416 with explicit restart. See the evidence matrix in [project.md](project.md#stage-5-recoveryresource-acceptance--in-progress-2026-11-13) for scope and remaining gates.
@@ -111,7 +111,7 @@ Reproduce with prepared pinned tools and a user systemd manager supporting these
 
 ```bash
 mkdir -p dist/stage5-resource/storage
-go test -c -o "$PWD/dist/stage5-resource/fluxget.test" .
+go test -c -o "$PWD/dist/stage5-resource/fluxget.test" ./internal/engine
 systemd-run --user --wait --pipe --collect --unit=fluxget-stage5-long -p CPUQuota=50% -p MemoryHigh=384M -p MemoryMax=512M -p MemorySwapMax=0 -p RuntimeMaxSec=180 -p TimeoutStopSec=5 --setenv=FLUXGET_MEDIA_TOOLS="$PWD/dist/install-current/media-tools/tools.json" --setenv=TMPDIR="$PWD/dist/stage5-resource/storage" "$PWD/dist/stage5-resource/fluxget.test" -test.run='^TestMediaQueueNativeLongDuration$' -test.v
 systemd-run --user --wait --pipe --collect --unit=fluxget-stage5-pressure -p CPUQuota=50% -p MemoryHigh=128M -p MemoryMax=384M -p MemorySwapMax=0 -p RuntimeMaxSec=90 -p TimeoutStopSec=5 --setenv=FLUXGET_MEDIA_PRESSURE=1 "$PWD/dist/stage5-resource/fluxget.test" -test.run='^TestMediaQueueNativeResourcePressure$' -test.v
 go test -race -count=1 -run '^TestDownloadDoesNotExpireWhileWaitingForMediaSlot$' ./media
@@ -138,7 +138,7 @@ The MP4 SHA-256 was `400a519111f2f79077a91ed1d23b69e0b446ceaee7798bd82e7602d4dc0
 Reproduce playlist acceptance with explicitly selected public input and prepared tools:
 
 ```bash
-FLUXGET_MEDIA_TOOLS="$PWD/dist/install-current/media-tools/tools.json" FLUXGET_MEDIA_PROXY="<PROXY_ADDRESS>" FLUXGET_MEDIA_PUBLIC_PLAYLIST='https://www.youtube.com/playlist?list=PL6IaIsEjSbf96XFRuNccS_RuEXwNdsoEu' go test -count=1 -v -run '^TestMediaQueuePublicPlaylist$' .
+FLUXGET_MEDIA_TOOLS="$PWD/dist/install-current/media-tools/tools.json" FLUXGET_MEDIA_PROXY="<PROXY_ADDRESS>" FLUXGET_MEDIA_PUBLIC_PLAYLIST='https://www.youtube.com/playlist?list=PL6IaIsEjSbf96XFRuNccS_RuEXwNdsoEu' go test -count=1 -v -run '^TestMediaQueuePublicPlaylist$' ./internal/engine
 ```
 
 The test accepts only an explicitly selected finite 2–10 item playlist with entries no longer than ten minutes each and uses an eight-minute context bound. It skips in ordinary CI; public-service availability does not gate deterministic CI. These samples do not close native Windows, the full public format/Shorts matrix, public recovery or prolonged wall-clock/storage acceptance.

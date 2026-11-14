@@ -14,7 +14,7 @@ import (
 )
 
 func TestManagementDefaultsAutomaticAndPreservesExplicitManual(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	setTestConfig(t, t.TempDir())
 	s, err := loadSpeedSettings()
 	if err != nil {
 		t.Fatal(err)
@@ -48,7 +48,7 @@ func TestManagementDefaultsAutomaticAndPreservesExplicitManual(t *testing.T) {
 }
 
 func TestManagementControlsCollapsedAndWaitForAcknowledgment(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	setTestConfig(t, t.TempDir())
 	a := test.NewApp()
 	defer a.Quit()
 	w := a.NewWindow("management")
@@ -201,7 +201,7 @@ func TestHardwareObservationsStayRuntimeOnlyAndRender(t *testing.T) {
 	defer a.Quit()
 	w := a.NewWindow("Hardware observations")
 	defer w.Close()
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	setTestConfig(t, t.TempDir())
 	s, err := loadSpeedSettings()
 	if err != nil {
 		t.Fatal(err)

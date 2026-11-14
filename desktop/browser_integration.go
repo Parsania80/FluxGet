@@ -3,9 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/Parsania80/FluxGet/internal/platformcmd"
-	"net/url"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -16,31 +13,30 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 	"github.com/Parsania80/FluxGet/browserbridge"
+	"github.com/Parsania80/FluxGet/internal/platformcmd"
 )
 
 type browserIntegration struct {
 	promptID string
 
-	store *browserbridge.Store
-	view  *downloadsView
-	note  *widget.Label
+	store           *browserbridge.Store
+	view            *downloadsView
+	note            *widget.Label
+	refreshProfiles func()
 }
 
 func newBrowserIntegration(v *downloadsView) *browserIntegration {
 	store, err := browserbridge.OpenStore()
-	b := &browserIntegration{store: store, view: v, note: widget.NewLabel("")}
-	b.note.Wrapping = fyne.TextWrapWord
+	note := widget.NewLabel("")
+	note.Wrapping = fyne.TextWrapWord
 	if err != nil {
-		b.note.SetText("Browser settings unavailable: " + err.Error())
-	} else {
-		b.note.SetText("Install the extension, enable its browser below, then connect this profile from the extension popup.")
+		note.SetText("Browser settings unavailable: " + err.Error())
 	}
-	return b
+	return &browserIntegration{store: store, view: v, note: note}
 }
 func (b *browserIntegration) page() fyne.CanvasObject {
-	title := widget.NewLabelWithStyle("Browser downloads", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	if b.store == nil {
-		return container.NewVBox(title, b.note)
+		return b.note
 	}
 	p := b.store.Snapshot()
 	master := widget.NewCheck("Enable browser integration", nil)
@@ -80,15 +76,18 @@ func (b *browserIntegration) page() fyne.CanvasObject {
 		if err != nil {
 			result.SetText("Could not save: " + err.Error())
 		} else {
-			result.SetText("Saved. Changes apply to new handoffs. Existing FluxGet downloads continue.")
+			result.SetText("Browser settings saved.")
 		}
 	})
 	save.Importance = widget.HighImportance
-	explain := widget.NewLabel("Grant site access in the extension to capture public downloads. Logins, POST requests, private browsing and uncertain requests stay in your browser. Firefox Snap and Opera still need native verification.")
-	explain.Wrapping = fyne.TextWrapWord
+	intro := widget.NewLabel("Use the FluxGet extension to send public downloads from your browser to this app.")
+	intro.Wrapping = fyne.TextWrapWord
+	setup := widget.NewButton("Set up browser extension", b.showSetup)
+	setup.Importance = widget.HighImportance
 	profiles := widget.NewLabel("")
 	profiles.Wrapping = fyne.TextWrapWord
-	refresh := func() {
+	reset := widget.NewButton("Disconnect all profiles", nil)
+	b.refreshProfiles = func() {
 		p := b.store.Snapshot()
 		counts := map[string]int{}
 		for _, profile := range p.Profiles {
@@ -96,41 +95,50 @@ func (b *browserIntegration) page() fyne.CanvasObject {
 				counts[profile.Browser]++
 			}
 		}
-		profiles.SetText(fmt.Sprintf("Consenting profiles: Chrome %d · Firefox %d · Opera %d", counts["chrome"], counts["firefox"], counts["opera"]))
-	}
-	refresh()
-	setup := widget.NewButton("Open extension folder", func() {
-		exe, err := os.Executable()
-		if err != nil {
+		if len(counts) == 0 {
+			profiles.SetText("No profiles connected. Open the FluxGet extension in your browser and turn on Enable this browser profile.")
+			reset.Disable()
 			return
 		}
-		path := filepath.Join(filepath.Dir(exe), "extensions")
-		u := &url.URL{Scheme: "file", Path: path}
-		if err = b.view.app.OpenURL(u); err != nil {
-			result.SetText(err.Error())
+		var connected []string
+		for _, name := range []string{"Chrome", "Firefox", "Opera"} {
+			if count := counts[strings.ToLower(name)]; count > 0 {
+				connected = append(connected, fmt.Sprintf("%s (%d)", name, count))
+			}
 		}
-	})
-	reset := widget.NewButton("Disconnect all profiles", func() {
-		dialog.ShowConfirm("Disconnect browser profiles?", "Each profile must opt in again. Existing FluxGet jobs continue.", func(yes bool) {
+		profiles.SetText(strings.Join(connected, " · "))
+		reset.Enable()
+	}
+	reset.OnTapped = func() {
+		confirm := dialog.NewConfirm("Disconnect all browser profiles?", "To reconnect, open the FluxGet extension in each browser profile and enable it again. Current downloads will continue.", func(yes bool) {
 			if !yes {
 				return
 			}
 			err := b.store.Edit(func(p *browserbridge.Policy) error { p.Profiles = map[string]browserbridge.Profile{}; return nil })
 			if err != nil {
-				result.SetText(err.Error())
+				result.SetText("Could not disconnect profiles: " + err.Error())
+				return
 			}
-			refresh()
+			b.refreshProfiles()
+			result.SetText("All browser profiles disconnected.")
 		}, b.view.window)
-	})
+		confirm.SetConfirmText("Disconnect all")
+		confirm.Show()
+	}
 	reset.Importance = widget.LowImportance
-	options := widget.NewCard("Browser downloads", "", container.NewVBox(explain, master,
+	b.refreshProfiles()
+	refresh := widget.NewButton("Refresh profiles", func() {
+		b.refreshProfiles()
+		result.SetText("Profile list refreshed.")
+	})
+	options := widget.NewCard("Browser settings", "", container.NewVBox(master,
 		container.NewHBox(browsers["chrome"], browsers["firefox"], browsers["opera"]),
 		widget.NewForm(widget.NewFormItem("Capture mode", mode), widget.NewFormItem("Excluded hosts", exclusions))))
-	connection := widget.NewCard("Connected profiles", "", container.NewVBox(b.note, profiles,
-		container.NewGridWithColumns(2, setup, widget.NewButton("Refresh profiles", refresh)), reset))
+	connection := widget.NewCard("Connected profiles", "Browser profiles you enabled from the extension", container.NewVBox(profiles,
+		container.NewGridWithColumns(2, refresh, reset)))
 	return container.NewBorder(nil,
 		container.NewVBox(widget.NewSeparator(), container.NewBorder(nil, nil, nil, save, result)), nil, nil,
-		container.NewVScroll(container.NewPadded(container.NewVBox(options, connection))))
+		container.NewVScroll(container.NewPadded(container.NewVBox(intro, setup, options, connection, b.note))))
 }
 func (b *browserIntegration) handle(ctx context.Context, r browserbridge.Request) browserbridge.Response {
 	if b.store == nil {
@@ -150,9 +158,14 @@ func (b *browserIntegration) handle(ctx context.Context, r browserbridge.Request
 		if err != nil {
 			return browserbridge.Failure(err.Error())
 		}
+		fyne.Do(func() {
+			if b.refreshProfiles != nil && !b.view.closing {
+				b.refreshProfiles()
+			}
+		})
 		return b.store.Snapshot().Reply(r)
 	}
-	if r.Operation == "policy" {
+	if r.Operation == "policy" || r.Operation == "profile-status" {
 		return b.store.Snapshot().Reply(r)
 	}
 	reply := make(chan browserbridge.Response, 1)

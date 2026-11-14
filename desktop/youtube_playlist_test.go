@@ -250,7 +250,7 @@ func TestYouTubePlaylistScreenshotAndDownloadsSummary(t *testing.T) {
 		{"light", fyne.NewSize(1100, 720), theme.LightTheme()},
 		{"wide", fyne.NewSize(1440, 900), theme.DarkTheme()},
 	} {
-		fyne.CurrentApp().Settings().SetTheme(fluxTheme{screen.theme})
+		fyne.CurrentApp().Settings().SetTheme(fluxTheme{Theme: screen.theme})
 		y.window.Resize(screen.size)
 		assertControlsVisible(t, y.window, y.playlist.download, y.playlist.prepare, y.playlist.acceptLower, y.playlist.previous, y.playlist.next)
 		if y.playlist.list.Size().Height < 100 {

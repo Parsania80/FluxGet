@@ -30,6 +30,8 @@ Get the package for your system from [GitHub Releases](https://github.com/Parsan
 
 Both installers include the app, engine, browser hosts, and extension folders. See the release notes for system requirements and testing limits.
 
+The local Windows preview uses the 2.0.0 version label. To test its browser setup, open **Settings → Browser downloads → Set up browser extension**. If Chrome already has FluxGet loaded from this installation, use **Reload** on the FluxGet card in `chrome://extensions`.
+
 ## Build and open the desktop app
 
 You need **Go 1.26.8 or later**, a C compiler, and the Linux graphics development libraries required by [Fyne](https://docs.fyne.io/started/quick/).
@@ -44,6 +46,8 @@ go build -o dist/fluxget .
 ```
 
 Keep `fluxget` and `fluxget-gui` together in the same folder.
+
+To change the app's theme, open **Settings → General → Appearance**, choose **Follow system**, **Light**, or **Dark**, and click **Save settings**. FluxGet applies the choice immediately and remembers it when you reopen the app.
 
 ## Download a file
 
@@ -82,7 +86,7 @@ A failed proxy reports an error and never falls back to Direct automatically. Yo
 
 Included in v2 builds; not included in v1.0.0.
 
-On first use, open **YouTube → Media tools → Set up YouTube tools** and confirm the download. FluxGet downloads pinned yt-dlp, Deno and FFmpeg tools directly from their upstream releases and verifies SHA-256 checksums. Setup uses the YouTube tab's selected proxy or Direct, needs internet access and about 700 MB of free space, and can be canceled. No Python, terminal or manual tool download is needed. An existing `tools.json` can also be selected. See [tool notices](packaging/MEDIA-TOOLS-NOTICES.md).
+In the updated source builds, paste a YouTube link and choose **Analyze**. If tools are missing, choose **Install** to set them up and continue analyzing the same link, or **Later** to defer setup. FluxGet downloads pinned yt-dlp, Deno and FFmpeg tools from their upstream releases and verifies SHA-256 checksums. Setup uses the YouTube tab's selected connection, requires internet access and about 700 MB of free space, and can be canceled. For manual setup or to select an existing `tools.json`, open **Media tools**. See [tool notices](packaging/MEDIA-TOOLS-NOTICES.md).
 
 Paste a public video or Shorts link and choose **Analyze**. Choose **Video** or **Audio only**, format, quality, folder and filename, then **Download**. For a finite playlist, choose **Choose from playlist**, select entries and add them to Downloads. Use the usual pause, resume, cancel and speed controls. Existing files are kept. Unfinished jobs reopen paused; damaged or unverified saved media and rejected saved ranges may require **Restart media from beginning**. Transfers have network timeouts but no fixed 30-minute transfer cutoff.
 
@@ -100,9 +104,9 @@ YouTube **Mixes** (`list=RD…`) are not supported by playlist import in this pr
 
 ## Browser downloads
 
-Browser setup currently uses a development extension. The recommended release setup is a normal FluxGet installer that configures the local bridge and guides you through connecting your browser; end users should not need Developer mode or folder selection. The v1 installers install the app and register Chrome/Firefox hosts; store distribution and the browser connection wizard are still pending.
+FluxGet installers include browser extension files and register the Chrome and Firefox hosts. Go to **Settings → Browser downloads → Set up browser extension** and choose your browser. Use **Copy folder path** to paste the preinstalled location into the browser's file picker, or **Open extension folder** to browse the files. Chrome requires you to load this development extension from its extensions page and approve access.
 
-See [browser setup](extensions/README.md) to build/register the bridge and load the extension. Open `chrome://extensions`, turn on Developer mode, and **Load unpacked** from the installed `extensions/chrome` folder. With the Linux `.deb` this is `/opt/fluxget/extensions/chrome`; on Windows it is `%LOCALAPPDATA%\Programs\FluxGet\extensions\chrome`. Select the folder itself. In FluxGet **Settings → Browser downloads**, enable integration and your browser. Then enable your profile in the extension popup.
+For Chrome, turn on **Developer mode** and choose **Load unpacked**. In **Browser downloads**, enable integration and your browser, then save. Open FluxGet from the browser toolbar, turn on **Enable this browser profile**, and choose **Test connection**. The desktop's **Connected profiles** list shows where you enabled the extension. **Disconnect all profiles** stops new handoffs until each profile opts in again. See [browser setup](extensions/README.md) for manual setup and source-build instructions.
 
 Choose **Download automatically** for capture, or **Ask before downloading** to confirm each file. Approve website access once when enabling the profile, or choose **Enable capture for all websites** in the popup. Reload the page before retrying. New websites need no separate setup; the same capture rules apply across websites, with no special handling for individual download sites. To keep downloads from certain hosts in your browser, add them to **Settings → Browser downloads → Excluded hosts**; subdomains are included. You can disable capture globally, per browser/profile, or temporarily. You can also right-click a public link and choose **Send link to FluxGet**.
 

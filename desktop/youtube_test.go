@@ -15,6 +15,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/theme"
+	"fyne.io/fyne/v2/widget"
 	"github.com/Parsania80/FluxGet/media"
 	"github.com/Parsania80/FluxGet/networkproxy"
 )
@@ -36,7 +37,7 @@ func youtubeTestView(t *testing.T) (*youtubeView, chan func()) {
 	t.Helper()
 	setTestConfig(t, t.TempDir())
 	a := test.NewApp()
-	a.Settings().SetTheme(fluxTheme{theme.DefaultTheme()})
+	a.Settings().SetTheme(fluxTheme{Theme: theme.DefaultTheme()})
 	t.Cleanup(a.Quit)
 	w := a.NewWindow("FluxGet — YouTube")
 	t.Cleanup(w.Close)
@@ -258,6 +259,10 @@ func TestYouTubeErrorsAreActionableAndRedacted(t *testing.T) {
 	if !strings.Contains(y.status.Text, "Media tools are missing") || y.options.Visible() {
 		t.Fatal("missing-tool action is unclear", y.status.Text)
 	}
+	test.Tap(findFluxGetButton(t, y.window.Canvas().Overlays().Top(), "Later"))
+	if y.busy || y.link.Text != "https://youtu.be/AAAAAAAAAAA" {
+		t.Fatal("Later started setup or lost the link")
+	}
 	y.analyzer = func(context.Context, string, networkproxy.Config, string) (media.Video, error) {
 		return media.Video{}, errors.New("https://cdn.invalid/?token=PRIVATE-TOKEN")
 	}
@@ -271,6 +276,61 @@ func TestYouTubeErrorsAreActionableAndRedacted(t *testing.T) {
 	if y.busy || !strings.Contains(y.status.Text, "Set a valid proxy") {
 		t.Fatal("missing proxy was not rejected before network work")
 	}
+}
+
+func TestYouTubeMissingToolsPromptInstallsAndResumesPlaylist(t *testing.T) {
+	y, queue := youtubeTestView(t)
+	y.tools.SetText(filepath.Join(t.TempDir(), "missing.json"))
+	y.link.SetText("https://www.youtube.com/playlist?list=PL1234567890")
+	installed := filepath.Join(t.TempDir(), "tools.json")
+	y.setupTools = func(context.Context, networkproxy.Config) (string, error) { return installed, nil }
+	y.playlistLoader = func(_ context.Context, manifest string, _ networkproxy.Config, _ string, _ int) (media.PlaylistPage, error) {
+		if manifest != installed {
+			return media.PlaylistPage{}, media.ErrTools
+		}
+		return media.PlaylistPage{ID: "PL1234567890", Title: "Playlist fixture"}, nil
+	}
+	test.Tap(y.analyze)
+	finishYouTubeAnalysis(t, queue)
+	test.Tap(findFluxGetButton(t, y.window.Canvas().Overlays().Top(), "Install"))
+	finishYouTubeAnalysis(t, queue)
+	finishYouTubeAnalysis(t, queue)
+	if y.busy || y.tools.Text != installed || y.playlist.page.Title != "Playlist fixture" {
+		t.Fatal("playlist did not resume after installation")
+	}
+}
+
+func findFluxGetButton(t *testing.T, root fyne.CanvasObject, label string) *widget.Button {
+	t.Helper()
+	var find func(fyne.CanvasObject) *widget.Button
+	find = func(object fyne.CanvasObject) *widget.Button {
+		var children []fyne.CanvasObject
+		switch v := object.(type) {
+		case *widget.Button:
+			if v.Text == label {
+				return v
+			}
+		case *widget.PopUp:
+			return find(v.Content)
+		case *container.Scroll:
+			return find(v.Content)
+		case *fyne.Container:
+			children = v.Objects
+		case fyne.Widget:
+			children = test.WidgetRenderer(v).Objects()
+		}
+		for _, child := range children {
+			if result := find(child); result != nil {
+				return result
+			}
+		}
+		return nil
+	}
+	button := find(root)
+	if button == nil {
+		t.Fatalf("missing button %q", label)
+	}
+	return button
 }
 
 func TestYouTubeUnavailableFormatsAndExplicitAlternative(t *testing.T) {

@@ -21,6 +21,8 @@ Keep the CLI, GUI and native hosts together. Register only the browsers you choo
 
 ## Set up Chrome
 
+In the updated desktop app, **Settings → Browser downloads → Set up browser extension** provides the browser address and opens the correct folder on Windows and Linux. The steps below also work manually.
+
 1. Open `chrome://extensions`, turn on Developer mode, and choose **Load unpacked**.
 2. Select `dist/extensions/chrome`, or the installed `extensions/chrome` folder from a v1 package. Pin FluxGet if desired.
 3. Open the updated FluxGet app. In **Settings → Browser downloads**, enable integration and Chrome. Choose **Ask before downloading** or **Download automatically**, then save.
@@ -68,4 +70,4 @@ Official protocol references: [Chrome native messaging](https://developer.chrome
 
 ## Version 1 packages
 
-Release installers include generated browser folders and matching native hosts. The Debian package registers Chrome and Firefox system-wide; the Windows setup registers them for the current user. They do not install extensions or approve browser permissions. The Windows app is installed under `%LOCALAPPDATA%\Programs\FluxGet`; the Debian package uses `/opt/fluxget`. Load the matching folder under `extensions` using the browser instructions above. Firefox temporary loading lasts until restart; persistent normal Firefox installation requires signing. Store packages and a graphical browser connection wizard are pending. Opera native acceptance remains open; Windows setup intentionally does not register Opera yet.
+Release installers include generated browser folders and matching native hosts. The Debian package registers Chrome and Firefox system-wide, and Windows setup registers them for the current user. Load the matching folder under `extensions` and approve access in the browser. The Windows app is installed under `%LOCALAPPDATA%\Programs\FluxGet`, and the Debian package uses `/opt/fluxget`. Firefox temporary loading lasts until restart. Persistent normal Firefox installation requires signing. Store packages and Opera native acceptance are pending. Windows setup registers Chrome and Firefox.

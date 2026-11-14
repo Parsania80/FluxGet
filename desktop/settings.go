@@ -18,6 +18,12 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
+const (
+	appearanceSystem = "Follow system"
+	appearanceLight  = "Light"
+	appearanceDark   = "Dark"
+)
+
 type speedSettings struct {
 	Proxy          networkproxy.Config `json:"proxy,omitempty"`
 	hardwareNote   *widget.Label
@@ -30,6 +36,7 @@ type speedSettings struct {
 	SortFiles      bool             `json:"sort_files"`
 	Overall        int64            `json:"overall_kib,omitempty"`
 	DisplayUnit    string           `json:"display_unit,omitempty"`
+	Appearance     string           `json:"appearance,omitempty"`
 	ManagementMode string           `json:"management_mode,omitempty"`
 	TotalRequests  int              `json:"total_requests,omitempty"`
 	OriginRequests int              `json:"origin_requests,omitempty"`
@@ -42,7 +49,7 @@ func loadSpeedSettings() (*speedSettings, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &speedSettings{path: filepath.Join(dir, "fluxget", "desktop-speed.json"), Overrides: map[string]int64{}, MaxActive: 5, Connections: 4, SortFiles: true, DisplayUnit: "MB", ManagementMode: "automatic", TotalRequests: 8, OriginRequests: 4}
+	s := &speedSettings{path: filepath.Join(dir, "fluxget", "desktop-speed.json"), Overrides: map[string]int64{}, MaxActive: 5, Connections: 4, SortFiles: true, DisplayUnit: "MB", Appearance: appearanceSystem, ManagementMode: "automatic", TotalRequests: 8, OriginRequests: 4}
 	data, err := platformfile.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return s, s.save()
@@ -71,6 +78,9 @@ func loadSpeedSettings() (*speedSettings, error) {
 	}
 	if s.DisplayUnit != "KB" && s.DisplayUnit != "MB" && s.DisplayUnit != "GB" {
 		return nil, errors.New("invalid display unit")
+	}
+	if s.Appearance != appearanceLight && s.Appearance != appearanceDark {
+		s.Appearance = appearanceSystem
 	}
 	if s.Default < 0 || s.Default > 1<<30 || (s.Enabled && s.Default == 0) {
 		return nil, errors.New("invalid default speed limit")
@@ -272,6 +282,11 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool,
 	inputUnit := displayUnit(s.DisplayUnit)
 	unit := widget.NewSelect([]string{"KB", "MB", "GB"}, nil)
 	unit.SetSelected(inputUnit)
+	appearance := widget.NewSelect([]string{appearanceSystem, appearanceLight, appearanceDark}, nil)
+	appearance.SetSelected(appearanceSystem)
+	if s.Appearance != "" {
+		appearance.SetSelected(s.Appearance)
+	}
 	enabled := widget.NewCheck("Limit the speed of each download", nil)
 	enabled.SetChecked(s.Enabled)
 	value := widget.NewEntry()
@@ -326,6 +341,7 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool,
 			return
 		}
 		next.DisplayUnit = unit.Selected
+		next.Appearance = appearance.Selected
 		next.ManagementMode = "automatic"
 		if mode.Selected == "Manual" {
 			next.ManagementMode = "manual"
@@ -403,7 +419,7 @@ func (s *speedSettings) page(w fyne.Window, onSaved func(), canSave func() bool,
 	unitNote := widget.NewLabel("Sizes and speeds use decimal units: 1,000 KB = 1 MB; 1,000 MB = 1 GB.")
 	unitNote.Wrapping = fyne.TextWrapWord
 	general := container.NewVBox(
-		widget.NewCard("Files & display", "", container.NewVBox(widget.NewForm(
+		widget.NewCard("Files & display", "", container.NewVBox(widget.NewForm(widget.NewFormItem("Appearance", appearance),
 			widget.NewFormItem("Default folder", container.NewBorder(nil, nil, nil, browse, folder)), widget.NewFormItem("Data unit", unit)), sortFiles, sortNote, unitNote)),
 		widget.NewCard("Speed limits", "", container.NewVBox(enabled, limits, speedNote)))
 	connectionsPage := container.NewVBox(widget.NewCard("Download management", "", container.NewVBox(managementNote,

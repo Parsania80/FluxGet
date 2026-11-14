@@ -151,5 +151,11 @@ func (p Policy) Excluded(raw string) bool {
 	return false
 }
 func (p Policy) Reply(r Request) Response {
-	return Response{Version: Version, OK: true, Enabled: p.Allowed(r), Mode: p.Mode}
+	reply := Response{Version: Version, OK: true, Enabled: p.Allowed(r), Mode: p.Mode}
+	if r.Operation == "profile-status" {
+		profile := p.Profiles[r.Profile]
+		connected := profile.Enabled && profile.Browser == r.Browser
+		reply.Connected = &connected
+	}
+	return reply
 }
