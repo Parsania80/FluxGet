@@ -29,11 +29,11 @@ Keep these priorities while continuing engine release verification alongside pro
 | 13 | Optional proxy routing per download | ✅ Done | Settings default, per-download Proxy/Direct controls, HTTP/HTTPS/SOCKS5, browser-intake defaults, CLI and media adapter; native Linux/Windows CI passed |
 | 14 | File-type download folders | ✅ Done | Paired Linux preview, seven-category/no-overwrite acceptance and native Linux/Windows CI passed; merged into main at e71c90a |
 | 15 | v2.0.0 Windows/Linux release | ✅ Done | Original YouTube release is published |
-| 16 | v2.0.1 Windows/Linux release | 🔄 Current | Browser setup, YouTube onboarding and appearance. Native installer verification runs before publication. |
+| 16 | v2.0.1 Windows/Linux release | ✅ Done | Windows and Linux installers and checksums are published after both native installer checks passed. |
 
-### ➡️ Current: #16 — v2.0.1 installer verification
+### ➡️ Current: #8 — Browser packaging and acceptance
 
-### ⏭️ Next: #16 — Verify both installers, checksums and release assets
+### ⏭️ Next: #8 — Continue live browser handoff checks
 
 **Desktop UI refresh — ✅ Done:** Operator-requested refinement covers all three tabs: the installed YouTube playlist workspace; Downloads with full-width filenames, contextual actions and a persistent selection bar; Settings split into General, Connections, Proxy and Browser downloads with persistent save controls. The refreshed Linux GUI is installed, saved queue/settings/browser-consent data is preserved, and the operator approved committing the changes on 2026-11-13. Functional stage-4 approval remains recorded; stage-5 recovery/resource acceptance is underway, with remaining native/public checks still open.
 
