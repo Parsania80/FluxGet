@@ -10,7 +10,7 @@ This file describes current decisions and remaining work. [README.md](README.md)
 
 Keep these priorities while continuing engine release verification alongside product development.
 
-**2026-11-14 follow-up:** `main` contains the v2.0.0 tag and release merge. The working tree adds guided browser setup, visible profile refresh and disconnection, and a YouTube tools installer prompt. It also moves the engine and its tests into `internal/engine/`. Live browser handoff and Linux desktop acceptance remain open for these changes.
+**2026-11-14 follow-up:** The published v2.0.0 tag marks the original release. `main` adds guided browser setup, visible profile refresh and disconnection, a YouTube tools installer prompt, and appearance settings. It also moves the engine and its tests into `internal/engine/`. `release-v2.0.0` carries those changes into v2.0.1. The release workflow verifies both native installers before publication. Broader live browser handoff remains open.
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
@@ -28,11 +28,12 @@ Keep these priorities while continuing engine release verification alongside pro
 | 12 | YouTube videos and playlists | 🔄 Current | Stages 1–4 implemented and native media/desktop CI passed; public Linux MP3/720p/playlist evidence; extended wall-clock/storage acceptance remains open |
 | 13 | Optional proxy routing per download | ✅ Done | Settings default, per-download Proxy/Direct controls, HTTP/HTTPS/SOCKS5, browser-intake defaults, CLI and media adapter; native Linux/Windows CI passed |
 | 14 | File-type download folders | ✅ Done | Paired Linux preview, seven-category/no-overwrite acceptance and native Linux/Windows CI passed; merged into main at e71c90a |
-| 15 | v2.0.0 Windows/Linux release | 🔄 Current | Operator-selected full YouTube scope; finish first-use native tool setup, notices and both installed-package gates before tagging/publication |
+| 15 | v2.0.0 Windows/Linux release | ✅ Done | Original YouTube release is published |
+| 16 | v2.0.1 Windows/Linux release | 🔄 Current | Browser setup, YouTube onboarding and appearance. Native installer verification runs before publication. |
 
-### ➡️ Current: #15 — v2.0.0: YouTube tool setup and installer acceptance
+### ➡️ Current: #16 — v2.0.1 installer verification
 
-### ⏭️ Next: #15 — Publish release-v2.0.0 through GitHub Desktop; pass both installer rehearsals, merge and tag v2.0.0 to publish
+### ⏭️ Next: #16 — Verify both installers, checksums and release assets
 
 **Desktop UI refresh — ✅ Done:** Operator-requested refinement covers all three tabs: the installed YouTube playlist workspace; Downloads with full-width filenames, contextual actions and a persistent selection bar; Settings split into General, Connections, Proxy and Browser downloads with persistent save controls. The refreshed Linux GUI is installed, saved queue/settings/browser-consent data is preserved, and the operator approved committing the changes on 2026-11-13. Functional stage-4 approval remains recorded; stage-5 recovery/resource acceptance is underway, with remaining native/public checks still open.
 
