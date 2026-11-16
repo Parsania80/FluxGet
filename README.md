@@ -4,7 +4,7 @@
 
 FluxGet is a download manager written in Go. It helps you manage several downloads, control their speed, and continue saved downloads after an interruption when the server allows it.
 
-**Version 2.0.2 is being prepared for Linux and Windows (64-bit Intel/AMD).** It fixes Chrome handoffs, cancellation, Ctrl-click browser controls and duplicate-download choices. Version tags publish packages after native checks and both installer verifications pass. Chrome has hands-on Windows evidence; Firefox, Opera and other Linux distributions still need native testing. macOS is not included.
+**Version 2.0.2 is available for 64-bit Windows and Debian/Ubuntu.** It fixes Chrome handoffs, cancellation, Ctrl-click browser controls and duplicate-download choices. Both installers passed native verification. Chrome has hands-on Windows evidence. Firefox, Opera and other Linux distributions still need native testing. [Download FluxGet v2.0.2](https://github.com/Parsania80/FluxGet/releases/tag/v2.0.2)
 
 **[Version 2.0.0](https://github.com/Parsania80/FluxGet/releases/tag/v2.0.0)** introduced YouTube videos and playlists, per-download proxy routing, and automatic file-type folders. Version 2.0.1 adds guided browser setup, a first-use YouTube tools prompt, and a saved appearance choice. The [releases page](https://github.com/Parsania80/FluxGet/releases) lists published Windows and Linux installers.
 

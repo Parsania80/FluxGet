@@ -30,11 +30,11 @@ Keep these priorities while continuing engine release verification alongside pro
 | 14 | File-type download folders | ✅ Done | Paired Linux preview, seven-category/no-overwrite acceptance and native Linux/Windows CI passed; merged into main at e71c90a |
 | 15 | v2.0.0 Windows/Linux release | ✅ Done | Original YouTube release is published |
 | 16 | v2.0.1 Windows/Linux release | ✅ Done | Browser setup, YouTube onboarding and appearance; published release preserved. |
-| 17 | v2.0.2 Windows/Linux release | 🔄 Current | Chrome capture, approval/cancel, Ctrl-click controls and shared duplicate handling. Operator verified the Windows preview; native installer gates precede publication. |
+| 17 | v2.0.2 Windows/Linux release | ✅ Done | Chrome capture, approval and cancellation, Ctrl-click controls and duplicate handling. Published after native installer verification on both platforms. [Release](https://github.com/Parsania80/FluxGet/releases/tag/v2.0.2) |
 
-### ➡️ Current: #17 — v2.0.2 release verification
+### ➡️ Current: #6 — Chrome capture and integration settings
 
-### ⏭️ Next: #17 — Verify both installers, checksums and publish v2.0.2
+### ⏭️ Next: #7 — Firefox and Opera rollout
 
 **Desktop UI refresh — ✅ Done:** Operator-requested refinement covers all three tabs: the installed YouTube playlist workspace; Downloads with full-width filenames, contextual actions and a persistent selection bar; Settings split into General, Connections, Proxy and Browser downloads with persistent save controls. The refreshed Linux GUI is installed, saved queue/settings/browser-consent data is preserved, and the operator approved committing the changes on 2026-11-13. Functional stage-4 approval remains recorded; stage-5 recovery/resource acceptance is underway, with remaining native/public checks still open.
 
