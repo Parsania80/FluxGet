@@ -23,6 +23,7 @@ type browserIntegration struct {
 	view            *downloadsView
 	note            *widget.Label
 	refreshProfiles func()
+	promptWindow    fyne.Window
 }
 
 func newBrowserIntegration(v *downloadsView) *browserIntegration {
@@ -191,26 +192,46 @@ func (b *browserIntegration) handle(ctx context.Context, r browserbridge.Request
 				respond(browserbridge.Failure("Capture is disabled for this browser, profile or site"))
 				return
 			}
+			b.promptID = r.Key()
+			finish := func(response browserbridge.Response) {
+				if b.promptID == r.Key() {
+					b.promptID, b.promptWindow = "", nil
+				}
+				respond(response)
+			}
+			fail := func(message string) { finish(browserDownloadCanceled(message)) }
+			go func() {
+				select {
+				case <-ctx.Done():
+				case <-time.After(60 * time.Second):
+				}
+				fyne.Do(func() {
+					if b.promptID == r.Key() && b.promptWindow != nil {
+						b.promptWindow.Close()
+					}
+				})
+			}()
 			begin := func(folder, filename string, later, sortFiles bool) {
 				if ctx.Err() != nil {
-					respond(browserbridge.Failure("Handoff timed out; use the browser"))
+					fail("Handoff timed out; retry in FluxGet")
 					return
 				}
 				fresh := b.store.Snapshot()
 				if !fresh.Allowed(r) || fresh.Excluded(r.URL) || (r.Kind == "capture" && fresh.Mode == "manual") {
-					respond(browserbridge.Failure("Capture was disabled"))
+					fail("Capture was disabled")
 					return
 				}
 				filename = strings.TrimSpace(filename)
 				if filename == "" || filepath.Base(filename) != filename || strings.ContainsAny(filename, "/\\") {
-					respond(browserbridge.Failure("Choose a plain filename"))
+					fail("Choose a plain filename")
 					return
 				}
 				route, routeErr := proxyForDownload(v.settings.Proxy, v.settings.Proxy.Enabled)
 				if routeErr != nil {
-					respond(browserbridge.Failure("Configure the proxy address in FluxGet Settings"))
+					fail("Configure the proxy address in FluxGet Settings")
 					return
 				}
+				var destination string
 				v.workResult(func(q *queueClient) (desktopResponse, error) {
 					args := append([]string{"-suggest-output"}, downloadArgs(r.URL, folder, filename)...)
 					if sortFiles {
@@ -224,12 +245,11 @@ func (b *browserIntegration) handle(ctx context.Context, r browserbridge.Request
 					if err != nil {
 						return desktopResponse{}, err
 					}
-					// Identical IDs must always choose the identical destination. A conflict
-					// leaves the browser item intact; there is no implicit overwrite.
-					return q.request(ctx, desktopRequest{Operation: "browser-prepare", Action: r.Kind, BrowserLater: later, Job: queueEntry{Proxy: route, URL: r.URL, Destination: dest, State: "paused", IntakeID: r.Key()}})
+					destination = dest
+					return q.request(ctx, desktopRequest{Operation: "snapshot"})
 				}, func(response desktopResponse) {
-					respond(browserbridge.Response{Version: browserbridge.Version, OK: true, JobID: response.JobID, Stage: response.BrowserStage, Filename: filename})
-				}, func(err error) { respond(browserbridge.Failure(err.Error())) })
+					b.prepareDownload(ctx, r, downloadDraft{Proxy: route, URL: r.URL, Destination: destination, Later: later}, finish)
+				}, func(err error) { fail(err.Error()) })
 				// v.work reports errors on screen; the caller also needs an immediate
 				// protocol result rather than waiting for the entire browser timeout.
 			}
@@ -244,39 +264,23 @@ func (b *browserIntegration) handle(ctx context.Context, r browserbridge.Request
 			later := widget.NewCheck("Save paused for later", nil)
 			sortFiles := widget.NewCheck("Sort into a file-type folder", nil)
 			sortFiles.SetChecked(v.settings.SortFiles)
-			b.promptID = r.Key()
-			prompt := dialog.NewForm("Download with FluxGet?", "Use FluxGet", "Use browser", []*widget.FormItem{widget.NewFormItem("Folder", folder), widget.NewFormItem("Filename", name), widget.NewFormItem("", sortFiles), widget.NewFormItem("", later)}, func(yes bool) {
+			prompt := newBrowserDownloadPrompt(v.app, folder, name, sortFiles, later, func(choice browserDownloadChoice) {
 				if b.promptID == r.Key() {
-					b.promptID = ""
+					b.promptWindow = nil
 				}
-				if !yes {
-					respond(browserbridge.Failure("Kept in the browser"))
+				if choice == cancelBrowserDownload {
+					fail("Download canceled in FluxGet")
+					return
+				}
+				if choice == useBrowser {
+					finish(browserbridge.Failure("Kept in the browser"))
 					return
 				}
 				begin(strings.TrimSpace(folder.Text), name.Text, later.Checked, sortFiles.Checked)
-			}, v.window)
-			prompt.Resize(fyne.NewSize(580, 310))
-			v.window.Show()
-			v.window.RequestFocus()
+			})
+			b.promptWindow = prompt
 			prompt.Show()
-			go func() {
-				select {
-				case <-ctx.Done():
-					fyne.Do(func() {
-						if b.promptID == r.Key() {
-							b.promptID = ""
-						}
-						prompt.Hide()
-					})
-				case <-time.After(60 * time.Second):
-					fyne.Do(func() {
-						if b.promptID == r.Key() {
-							b.promptID = ""
-						}
-						prompt.Hide()
-					})
-				}
-			}()
+			prompt.RequestFocus()
 			return
 		}
 		policy := b.store.Snapshot()

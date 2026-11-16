@@ -10,7 +10,6 @@ import (
 	"github.com/Parsania80/FluxGet/networkproxy"
 	"image/color"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -777,6 +776,9 @@ func (v *downloadsView) close(done func()) {
 		return
 	}
 	v.closing = true
+	if v.browsers != nil && v.browsers.promptWindow != nil {
+		v.browsers.promptWindow.Close()
+	}
 	if v.youtube != nil {
 		v.youtube.shutdown()
 	}
@@ -882,15 +884,9 @@ func (v *downloadsView) addDialog() {
 			return callDesktop(q, desktopRequest{Operation: "snapshot"})
 		}, func(response desktopResponse) {
 			draft := downloadDraft{Proxy: route, URL: raw, Destination: destination, AutomaticName: filename == "", SortFiles: sortByType && filename == "", Later: later}
-			if _, err := os.Lstat(draft.Destination); err == nil {
-				v.duplicate(draft, draft.Destination)
+			if path := v.downloadConflict(draft, false); path != "" {
+				v.duplicate(draft, path)
 				return
-			}
-			for _, entry := range v.entries {
-				if entry.Destination == draft.Destination {
-					v.duplicate(draft, draft.Destination)
-					return
-				}
 			}
 			v.enqueue(draft)
 		})
@@ -922,20 +918,7 @@ func (v *downloadsView) enqueue(draft downloadDraft) {
 			id = draft.TargetID
 		}
 		if draft.Replace != nil {
-			index := -1
-			for i, h := range v.history {
-				if h.QueueID == id {
-					index = i
-					break
-				}
-			}
-			h := job{URL: draft.URL, Path: draft.Destination, State: "Paused", Replace: draft.Replace, QueueID: id}
-			if index < 0 {
-				v.history = append(v.history, h)
-			} else {
-				v.history[index] = h
-			}
-			if err := saveHistory(v.history); err != nil {
+			if err := v.saveDraftReplacement(draft, id); err != nil {
 				dialog.ShowError(err, v.window)
 				return
 			}
@@ -974,59 +957,18 @@ func (v *downloadsView) availableCopy(path string) (string, error) {
 	return "", fmt.Errorf("choose another filename")
 }
 func (v *downloadsView) duplicate(draft downloadDraft, path string) {
-	var prompt dialog.Dialog
-	message := widget.NewLabel("This filename is already in use. Choose what to do; partial data is kept.")
-	message.Wrapping = fyne.TextWrapWord
-	keep := widget.NewButton("Keep existing file", func() {
-		prompt.Hide()
-		if draft.TargetID > 0 {
-			v.selected = fmt.Sprintf("queue:%d", draft.TargetID)
-			v.perform("cancel", draft.TargetID)
+	v.resolveDuplicate(draft, path, false, func(choice duplicateChoice) {
+		if choice.Draft != nil {
+			v.enqueue(*choice.Draft)
+		} else if choice.ExistingID > 0 {
+			v.continueDuplicate(choice.ExistingID)
+		} else if choice.Keep {
+			if draft.TargetID > 0 {
+				v.perform("cancel", draft.TargetID)
+			}
+			v.status.SetText("Existing file kept.")
 		}
-		v.status.SetText("Existing file kept.")
 	})
-	copyButton := widget.NewButton("Save another copy", func() {
-		prompt.Hide()
-		copy, err := v.availableCopy(path)
-		if err != nil {
-			dialog.ShowError(err, v.window)
-			return
-		}
-		draft.Destination = copy
-		draft.AutomaticName = false
-		draft.SortFiles = false
-		draft.Replace = nil
-		v.enqueue(draft)
-	})
-	replace := widget.NewButton("Replace existing file…", func() {
-		prompt.Hide()
-		dialog.ShowConfirm("Replace existing file?", "FluxGet downloads a separate copy first and replaces the original only after success, if the original is unchanged.", func(yes bool) {
-			if !yes {
-				return
-			}
-			original, err := replacementFor(path)
-			if err != nil {
-				dialog.ShowError(err, v.window)
-				return
-			}
-			copy, err := v.availableCopy(path)
-			if err != nil {
-				dialog.ShowError(err, v.window)
-				return
-			}
-			draft.Destination = copy
-			draft.AutomaticName = false
-			draft.SortFiles = false
-			draft.Replace = original
-			v.enqueue(draft)
-		}, v.window)
-	})
-	if _, err := replacementFor(path); err != nil {
-		replace.Disable()
-	}
-	prompt = dialog.NewCustom("Filename already used", "Cancel", container.NewVBox(message, widget.NewLabel(filepath.Base(path)), keep, copyButton, replace), v.window)
-	prompt.Resize(fyne.NewSize(540, 320))
-	prompt.Show()
 }
 func (v *downloadsView) publishReplacement(id int, path string) {
 	if v.finishing[id] || v.client == nil {

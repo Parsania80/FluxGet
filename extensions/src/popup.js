@@ -9,26 +9,32 @@ async function allowAllWebsites() {
   await command("permission");
 }
 async function refresh() {
+  let remote;
   try {
     const result = await command("status");
-    const connected = result.remote.connected ?? (result.consent === true);
+    remote = result.remote;
+    const connected = result.consent === true && result.remote.connected !== false;
     $("enabled").checked = connected;
     captureMode = result.remote.mode;
-    $("status").textContent = !result.remote.ok ? result.remote.error : result.remote.enabled ? `Connected · ${result.remote.mode === "automatic" ? "Automatic capture" : result.remote.mode === "manual" ? "Manual sending" : "Ask first"}` : connected ? "Profile connected. Enable this browser in FluxGet settings." : "Turn on Enable this browser profile to connect to FluxGet.";
+    $("status").textContent = !result.remote.ok ? result.remote.error : !connected ? "Turn on Enable this browser profile to connect to FluxGet." : result.remote.enabled ? `Connected · ${result.remote.mode === "automatic" ? "Automatic capture" : result.remote.mode === "manual" ? "Manual sending" : "Ask first"}` : "Profile connected. Enable this browser in FluxGet settings.";
     const grants = await api.permissions.getAll();
     const hasSites = grants.permissions?.includes("webRequest") && grants.origins?.some(origin => /^https?:\/\//.test(origin) || origin === "<all_urls>");
     const allSites = await api.permissions.contains(CAPTURE_ACCESS);
     $("scope").textContent = allSites ? "All websites allowed. New sites do not need separate approval. Ctrl + left-click keeps a download in your browser." : hasSites ? "Finish setup to enable all websites and the Ctrl + left-click shortcut." : "Website access is not enabled. Approve it once to capture downloads across websites.";
     $("grant").hidden = allSites;
     $("revoke").hidden = !hasSites;
-    const needsSites = result.remote.ok && result.remote.enabled && result.remote.mode !== "manual" && !allSites;
+    const needsSites = result.remote.ok && connected && result.remote.enabled && result.remote.mode !== "manual" && !allSites;
     $("setup").hidden = !needsSites;
     if (needsSites) {
       $("status").textContent += hasSites ? " · Capture setup incomplete" : " · Site access required";
       $("setup").textContent = "Choose Enable capture for all websites below and approve the browser permission once. Then reload the page and retry. No need to enter individual websites.";
     }
     $("message").textContent = `${result.pending || 0} pending handoffs. ${result.lastMessage || ""}${result.pauseUntil > Date.now() ? " Capture is temporarily paused." : ""}`;
-  } catch (error) { $("status").textContent = error.message; }
+    return remote;
+  } catch (error) {
+    $("status").textContent = error.message;
+    return remote ?? { ok: false, error: error.message };
+  }
 }
 $("enabled").addEventListener("change", async () => {
   let error;
@@ -36,7 +42,20 @@ $("enabled").addEventListener("change", async () => {
   await refresh();
   if (error) $("message").textContent = error;
 });
-$("test").onclick = refresh;
+$("test").onclick = async () => {
+  const button = $("test"), message = $("test-result");
+  button.disabled = true;
+  message.hidden = false;
+  message.textContent = "Testing connection…";
+  try {
+    const remote = await refresh();
+    message.textContent = remote.ok
+      ? "Connection OK. FluxGet responded."
+      : "Connection failed. " + (remote.error || "Open FluxGet and try again.");
+  } finally {
+    button.disabled = false;
+  }
+};
 $("pause").onclick = async () => { await command("pause"); await refresh(); };
 $("retry").onclick = async () => { await command("retry"); await refresh(); };
 $("grant").onclick = async () => {
@@ -50,4 +69,7 @@ $("revoke").onclick = async () => {
     await refresh(); $("message").textContent = "Website access removed. New downloads stay in the browser; manual sending is still available.";
   } catch (e) { $("message").textContent = e.message; }
 };
+api.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.lastMessage) refresh();
+});
 refresh();

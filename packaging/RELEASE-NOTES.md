@@ -1,3 +1,16 @@
+# FluxGet 2.0.2
+
+- **Chrome downloads.** Common file links open the FluxGet approval window before Chrome starts a transfer. Public files that Chrome requests with cookies can be checked without cookies before handoff; login-required downloads remain in the browser.
+- **Clear approval choices.** Use FluxGet approves, Use browser explicitly continues in Chrome, and closing the window cancels. Accepted transfers remove their own canceled Chrome history entry.
+- **Duplicate downloads.** An existing transfer or filename opens the shared duplicate choices. Continue the current transfer, keep the existing file, save another copy, or confirm replacement of a finished file. Choosing FluxGet no longer silently falls back to Chrome on a filename conflict.
+- **Browser controls and feedback.** Ctrl + left-click keeps the transfer under Chrome's pause/cancel controls. Extension reload refreshes page handlers, stale contexts are handled, Test connection reports its result beside the button, and the popup updates capture diagnostics while open.
+
+Close FluxGet before upgrading. On Windows, run `fluxget-2.0.2-windows-amd64-setup.exe`. On Debian or Ubuntu, run `sudo apt install ./fluxget_2.0.2_amd64.deb`. Reload the existing FluxGet extension at `chrome://extensions` and refresh download pages after upgrading. Settings and queued downloads are retained.
+
+Chrome capture, approval, cancel-on-close, Ctrl-click pause and continuing a duplicate transfer were verified on Windows. Firefox and Opera still require native acceptance; these remain development extensions rather than store-distributed add-ons. The remaining platform, authenticated-download and media limitations below still apply.
+
+---
+
 # FluxGet 2.0.1
 
 - **Browser setup.** The setup guide shows where to load the bundled extension. Copy the folder path into the browser's file picker, or open it in Explorer on Windows or the file manager on Linux. Connected profile changes show up in FluxGet, and disconnected profiles can reconnect from the extension popup.

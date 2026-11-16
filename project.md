@@ -29,11 +29,12 @@ Keep these priorities while continuing engine release verification alongside pro
 | 13 | Optional proxy routing per download | ✅ Done | Settings default, per-download Proxy/Direct controls, HTTP/HTTPS/SOCKS5, browser-intake defaults, CLI and media adapter; native Linux/Windows CI passed |
 | 14 | File-type download folders | ✅ Done | Paired Linux preview, seven-category/no-overwrite acceptance and native Linux/Windows CI passed; merged into main at e71c90a |
 | 15 | v2.0.0 Windows/Linux release | ✅ Done | Original YouTube release is published |
-| 16 | v2.0.1 Windows/Linux release | 🔄 Current | Browser setup, YouTube onboarding and appearance. Native installer verification runs before publication. |
+| 16 | v2.0.1 Windows/Linux release | ✅ Done | Browser setup, YouTube onboarding and appearance; published release preserved. |
+| 17 | v2.0.2 Windows/Linux release | 🔄 Current | Chrome capture, approval/cancel, Ctrl-click controls and shared duplicate handling. Operator verified the Windows preview; native installer gates precede publication. |
 
-### ➡️ Current: #16 — v2.0.1 installer verification
+### ➡️ Current: #17 — v2.0.2 release verification
 
-### ⏭️ Next: #16 — Verify both installers, checksums and release assets
+### ⏭️ Next: #17 — Verify both installers, checksums and publish v2.0.2
 
 **Desktop UI refresh — ✅ Done:** Operator-requested refinement covers all three tabs: the installed YouTube playlist workspace; Downloads with full-width filenames, contextual actions and a persistent selection bar; Settings split into General, Connections, Proxy and Browser downloads with persistent save controls. The refreshed Linux GUI is installed, saved queue/settings/browser-consent data is preserved, and the operator approved committing the changes on 2026-11-13. Functional stage-4 approval remains recorded; stage-5 recovery/resource acceptance is underway, with remaining native/public checks still open.
 
@@ -569,7 +570,13 @@ The race detector needs a supported platform and C compiler; desktop builds need
 
 Queue commands include `add URL OUTPUT`, `import OUTPUT`, `list`, `inspect ID`, `start`, `pause ID`, `resume ID`, `cancel ID`, `retry ID`, `restart ID`, `discard ID`, `remove ID`, and `quit`. Import restores paused; restart/discard perform explicit owned-partial cleanup; CLI remove keeps files and requires inactivity. Saved-job listings show checkpoint snapshots, not live byte guarantees; resume revalidates them. Structured desktop operations provide additional batch/deletion/configuration behavior.
 
+### Public-file capture follow-up — 2026-11-16
+
+An ordinary Chrome click may include cookies even when the file is public. The extension now verifies a cookie-free HEAD response at the final URL before capturing these files, comparing size, MIME type and any strong ETag from the observed response. The five-second check rejects redirects and forwards no cookie or authorization values. The normal durable handoff starts after verification. This extends public-file capture. Authenticated transfer storage and replay remain separate roadmap work. Source tests include anonymous success, metadata mismatch, authorization fallback and a real loopback HEAD check. The operator confirmed capture of the original link and the separate approval window above Chrome on Windows. Full Windows headless desktop checks and the Linux desktop test cross-build passed.
+
 ### Local preview record
+
+**Direct file clicks — 2026-11-16:** Common file URLs now use the existing public-link admission path from a trusted content-script click. The desktop asks for approval before Chrome starts a transfer. Explicit browser fallback carries a one-use bypass ticket, and recovery retains accepted links when acknowledgments fail. The operator confirmed the original `.rar` link opens the popup without adding a Chrome download entry. All 38 extension tests passed.
 
 On 2026-11-10, refreshed `~/.local/opt/fluxget` with the verified current engine/desktop pair (including stage 4 and the uncommitted browser preview), three companion native executables, and generated extension folders. Backup: `~/.local/state/fluxget/backups/20261110-131848-browser-integration`. Normal close/reopen preserved saved checkpoint/settings hashes; the existing completed job stayed inactive. Native-host registrations were installed for Chrome and Firefox; Opera is absent. A framed request through the installed Chrome host reached the running desktop and returned disabled/ask, confirming the default opt-in state. Installed hashes match the tested builds. No extension was loaded into the operator's normal profiles and no download was started. The real queue remains schema 2 until its first browser handoff; that transaction backs up and upgrades it to schema 3. Refreshed the installed pair/hosts/extensions again for approved query-string/CDN support at 14:51; backup `~/.local/state/fluxget/backups/20261110-145136-browser-integration`. Installed hash checks and a synthetic query-bearing request reaching desktop policy validation passed; settings/checkpoints and existing downloads stayed unchanged.
 

@@ -16,45 +16,110 @@
     start(d) {
       this.prune();
       const previous = this.requests.get(d.requestId);
-      this.requests.set(d.requestId, { id: d.requestId, tab: d.tabId, started: previous?.started ?? this.now(), urls: [...(previous?.urls || []), d.url], method: d.method, unsafe: Boolean(previous?.unsafe) || d.method !== "GET" || !publicURL(d.url) || d.incognito === true, at: this.now(), headers: false, credentials: Boolean(previous?.credentials), status: 0 });
+      const tab = Number.isInteger(previous?.tab) && previous.tab >= 0 ? previous.tab : d.tabId;
+      this.requests.set(d.requestId, { id: d.requestId, tab, started: previous?.started ?? this.now(), urls: [...(previous?.urls || []), d.url], method: d.method, unsafe: Boolean(previous?.unsafe) || d.method !== "GET" || !publicURL(d.url) || d.incognito === true, at: this.now(), headers: false, cookie: Boolean(previous?.cookie), authorization: Boolean(previous?.authorization), range: Boolean(previous?.range), status: 0, downloadId: previous?.downloadId });
     }
     headers(d) {
       const r = this.requests.get(d.requestId); if (!r) return;
       r.headers = true;
-      r.credentials ||= (d.requestHeaders || []).some(h => /^(cookie|authorization|proxy-authorization|range)$/i.test(h.name));
-      // Retain only a boolean, never cookie/header contents.
+      // Retain only the header categories, never their values.
+      for (const header of d.requestHeaders || []) {
+        switch (header.name.toLowerCase()) {
+          case "cookie": r.cookie = true; break;
+          case "authorization": case "proxy-authorization": r.authorization = true; break;
+          case "range": r.range = true; break;
+        }
+      }
     }
-    response(d) { const r = this.requests.get(d.requestId); if (r) { r.status = d.statusCode; r.final = d.url; r.at = this.now(); } }
+    response(d) {
+      const r = this.requests.get(d.requestId);
+      if (!r) return;
+      r.status = d.statusCode; r.final = d.url; r.at = this.now();
+      const headers = d.responseHeaders || [];
+      const header = name => headers.find(h => h.name.toLowerCase() === name)?.value || "";
+      const length = header("content-length");
+      r.size = /^\d+$/.test(length) && Number.isSafeInteger(Number(length)) ? Number(length) : -1;
+      r.mime = header("content-type").split(";")[0].trim().toLowerCase();
+      const etag = header("etag");
+      r.etag = etag.length <= 256 && /^"[^"\r\n]+"$/.test(etag) ? etag : "";
+    }
     redirect(d) { const r = this.requests.get(d.requestId); if (r && (!r.headers || !publicURL(d.redirectUrl))) r.unsafe = true; }
+    finish(d) { const r = this.requests.get(d.requestId); if (r) r.finishedAt = this.now(); }
     prune() {
       for (const [id, r] of this.requests) if (this.now() - r.at > 30000) this.requests.delete(id);
       while (this.requests.size >= 512) this.requests.delete(this.requests.keys().next().value);
     }
-    inspect(item) {
+    matches(item) {
       this.prune();
+      const finalURL = item.finalUrl || item.url;
+      const matches = [...this.requests.values()].filter(r =>
+        (r.downloadId === undefined || r.downloadId === item.id) && (r.urls.includes(item.url) || r.final === finalURL));
+      const started = Date.parse(item.startTime);
+      if (matches.length < 2 || !Number.isFinite(started)) return matches;
+      // A finished request can still be the download's request: Chrome can
+      // report the item after the network event. Keep a margin for that delay
+      // and retain overlapping requests, even if only one looks safe to replay.
+      const cutoff = started - 1000;
+      if (!matches.some(r => r.started >= cutoff && r.started <= started + 1000 && r.urls.includes(item.url) && r.final === finalURL)) return matches;
+      return matches.filter(r => r.finishedAt === undefined || r.finishedAt >= cutoff || r.unsafe || r.cookie || r.authorization || r.range || !r.headers);
+    }
+    claim(item, request) {
+      if (!request || !Number.isInteger(item.id)) return false;
+      if (this.requests.get(request.id) !== request || (request.downloadId !== undefined && request.downloadId !== item.id)) return false;
+      request.downloadId = item.id;
+      return true;
+    }
+    inspect(item) {
       const reject = reason => ({ proof: null, reason });
       if (!item) return reject("The browser download is no longer available.");
       if (!publicURL(item.url) || !publicURL(item.finalUrl || item.url)) {
         return reject("This link is not a supported public HTTP/HTTPS file URL.");
       }
       if (item.incognito !== false) return reject("Private or unknown browser profiles are not supported.");
-      if (item.danger !== "safe") return reject("The browser has not marked this download safe for capture.");
       if (item.state !== "in_progress") return reject("The browser download finished or stopped before capture.");
       if (item.paused) return reject("This browser download is already paused. Capture applies to new downloads.");
       if (item.byExtensionId) return reject("Another extension manages this download.");
-      const matches = [...this.requests.values()].filter(r => r.urls.includes(item.url) || r.final === (item.finalUrl || item.url));
+      if (item.danger !== "safe") return reject("The browser has not marked this download safe for capture.");
+      const matches = this.matches(item);
       if (!matches.length) return reject("The original network request was not observed. Reload the page and retry.");
       if (matches.length !== 1) return reject("Several matching network requests were observed; capture could not identify one safely.");
       const r = matches[0];
       if (!r.urls.includes(item.url) || r.final !== (item.finalUrl || item.url)) return reject("The complete original-to-final download request was not observed.");
       if (r.unsafe) return reject("The request method or redirect is not supported for capture.");
       if (!r.headers) return reject("Request-header checks are unavailable for this download.");
-      if (r.credentials) return reject("The request uses cookies, authorization or range headers that this preview cannot replay.");
+      if (r.authorization) return reject("The request includes an authorization header. Continue this download in your browser.");
+      if (r.range) return reject("Chrome requested a byte range, as it does when resuming downloads. Try a fresh click on the original link.");
       if (![200, 206].includes(r.status)) return reject("The server did not return a supported download response.");
       if (this.now() - r.at > 15000) return reject("The observed download request is too old to capture safely.");
-      return { proof: { method: "GET", headers_observed: true, credentials: false, safe: true, private: false }, reason: "" };
+      const proof = { method: "GET", headers_observed: true, credentials: false, safe: true, private: false };
+      if (r.cookie) return { request: r, anonymous: { proof }, proof: null, reason: "Checking whether this file is available without browser cookies." };
+      return { request: r, proof, reason: "" };
     }
     proof(item) { return this.inspect(item).proof; }
+  }
+  async function verifyPublicDownload(item, request, fetcher = fetch) {
+    if (request.status !== 200 || request.size < 1 || !request.mime || /^(text\/|application\/(json|xhtml\+xml))/.test(request.mime)) {
+      throw Error("Kept in browser: Could not verify the file without browser cookies. Use Send link to FluxGet for a public link.");
+    }
+    const source = item.finalUrl || item.url;
+    if (!publicURL(source)) throw Error("Kept in browser: Unsupported download URL.");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    let response;
+    try {
+      // HEAD checks access and file identity without downloading a second body.
+      response = await fetcher(source, { method: "HEAD", credentials: "omit", cache: "no-store", redirect: "error", signal: controller.signal });
+      const size = response.headers.get("content-length");
+      const mime = (response.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+      if (response.status !== 200 || response.url !== source || !/^\d+$/.test(size || "") || Number(size) !== request.size || mime !== request.mime || (request.etag && response.headers.get("etag") !== request.etag)) {
+        throw Error("Anonymous response differs");
+      }
+    } catch {
+      throw Error("Kept in browser: This file could not be verified without browser cookies. Use Send link to FluxGet if it is public.");
+    } finally {
+      clearTimeout(timeout);
+      if (response?.body) await response.body.cancel().catch(() => {});
+    }
   }
   class BrowserBypass {
     constructor(tickets = [], now = () => Date.now()) { this.tickets = Array.isArray(tickets) ? tickets : []; this.now = now; this.prune(); }
@@ -65,20 +130,30 @@
       const matches = traces.filter(r => r.urls.includes(item.url) && r.final === (item.finalUrl || item.url));
       if (matches.length !== 1) return false;
       const request = matches[0];
-      const index = this.tickets.findIndex(t => !t.used && tabs.includes(t.tab) && request.started >= t.at && (!t.url || request.urls.includes(t.url)));
+      const index = this.tickets.findIndex(t => {
+        if (t.used || request.started < t.at - 250) return false;
+        // Chrome can detach a download request from its originating tab.
+        // An explicit link ticket still identifies the observed redirect chain.
+        if (t.url && request.urls.includes(t.url)) return tabs.includes(t.tab) || !Number.isInteger(request.tab) || request.tab < 0;
+        return !t.url && tabs.includes(t.tab);
+      });
       if (index < 0) return false;
       this.tickets[index].used = true; return true;
     }
   }
   class Handoff {
     constructor(api) { this.api = api; this.active = new Set(); }
-    async capture(item, proof) {
+    async capture(item, proof, anonymousRequest) {
       if (!proof || this.active.has(item.id) || this.active.size >= 4) return;
       this.active.add(item.id);
       let record;
       try {
         const policy = await this.api.native({ operation: "policy" });
-        if (!policy.enabled || policy.mode === "manual" || !(await this.api.enabled(item))) return;
+        if (!policy.ok) throw Error(policy.error || "FluxGet could not check browser integration.");
+        if (!policy.enabled) { await this.api.notice("Kept in browser: Enable integration, this browser, and this profile in FluxGet."); return; }
+        if (policy.mode === "manual") { await this.api.notice("Kept in browser: Capture mode is Manual sending only."); return; }
+        if (!(await this.api.enabled(item))) { await this.api.notice("Kept in browser: Capture is paused or this site lacks permission."); return; }
+        if (anonymousRequest) await this.api.verifyPublic(item, anonymousRequest);
         record = { item: item.id, request_id: this.api.uuid(), kind: "capture", stage: "pausing", created: Date.now() };
         await this.api.save(record);
         await this.api.pause(item.id);
@@ -86,6 +161,12 @@
         if (!paused || paused.state !== "in_progress" || !paused.paused || paused.danger !== "safe" || paused.incognito !== false) throw Error("Browser download could not be paused safely");
         record.stage = "preparing"; await this.api.save(record);
         const accepted = await this.api.native({ operation: "prepare", request_id: record.request_id, kind: "capture", url: item.finalUrl || item.url, filename: filename(paused), proof });
+        if (accepted.stage === "canceled" && !accepted.ok) {
+          record.stage = "dismissed";
+          record.notice = diagnostic(accepted.error || "Download canceled in FluxGet");
+          await this.api.save(record);
+          await this.reconcile(record); return;
+        }
         if (!accepted.ok || accepted.stage !== "pending") throw Error(accepted.error || "FluxGet did not accept the download");
         record.stage = "prepared"; await this.api.save(record);
         const fresh = await this.api.native({ operation: "policy" });
@@ -101,7 +182,7 @@
       } catch (error) {
         if (record) {
           if (record.stage === "cleanup") { await this.api.notice("Download is in FluxGet; browser history cleanup is pending. Choose Retry pending handoffs."); return; }
-          if (record.stage === "canceling" || record.stage === "activating") await this.api.notice("Handoff needs recovery. Open FluxGet's extension and choose Retry pending handoffs.");
+          if (["canceling", "activating", "dismissed"].includes(record.stage)) await this.api.notice("Handoff needs recovery. Open FluxGet's extension and choose Retry pending handoffs.");
           else await this.abandon(record);
         }
         await this.api.notice(diagnostic(error.message || "Kept in the browser"));
@@ -114,6 +195,24 @@
       await this.api.remove(record.request_id);
     }
     async reconcile(record) {
+      if (record.stage === "dismissed") {
+        // A closed prompt authorizes cancellation, never browser resumption or
+        // FluxGet activation. Persist this intent until exact-item cleanup ends.
+        await this.api.native({ operation: "abort", request_id: record.request_id, kind: record.kind });
+        if (record.kind === "link") {
+          await this.api.remove(record.request_id);
+          await this.api.notice(record.notice || "Download canceled in FluxGet"); return;
+        }
+        let item = await this.api.item(record.item);
+        if (item?.state === "in_progress") {
+          await this.api.cancel(record.item);
+          item = await this.api.item(record.item);
+          if (item?.state === "in_progress") throw Error("Browser cancellation is not confirmed");
+        }
+        if (item?.state === "interrupted" && item.error === "USER_CANCELED") await this.api.erase(record.item);
+        await this.api.remove(record.request_id);
+        await this.api.notice(record.notice || "Download canceled in FluxGet"); return;
+      }
       if (record.kind === "link") {
         if (record.stage !== "link-activating") { await this.api.native({ operation: "abort", request_id: record.request_id, kind: "link" }); await this.api.remove(record.request_id); return; }
         const reply = await this.api.native({ operation: "activate", request_id: record.request_id, kind: "link", canceled: true });
@@ -153,7 +252,7 @@
       }
     }
   }
-  const exported = { HOST, publicURL, filename, diagnostic, Evidence, BrowserBypass, Handoff };
+  const exported = { HOST, publicURL, filename, diagnostic, Evidence, BrowserBypass, Handoff, verifyPublicDownload };
   root.FluxGetCore = exported;
   if (typeof module !== "undefined") module.exports = exported;
 })(globalThis);

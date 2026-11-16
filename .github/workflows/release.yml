@@ -85,7 +85,7 @@ jobs:
           go test -race -count=1 -v -run '^(TestWindows|TestSorted|TestMediaTool)' ./... 2>&1 | tee "$RUNNER_TEMP/fluxget-windows-tests.log"
           go vet ./...
           cd desktop
-          go test -race -tags ci -count=1 -v -run '^(TestDownloadUsesExistingCLI|TestPausedDownloadCanResume|TestDesktopQueueUsesPersistentCLIScheduler|TestProxy|TestYouTube|TestUnifiedSorted|TestSpeedSettingsPersist|TestSettingsUnitSelector)' . 2>&1 | tee -a "$RUNNER_TEMP/fluxget-windows-tests.log"
+          go test -race -tags ci -count=1 -v -run '^(TestBrowserDuplicate|TestSharedDuplicate|TestBrowserDownloadPrompt|TestDownloadUsesExistingCLI|TestPausedDownloadCanResume|TestDesktopQueueUsesPersistentCLIScheduler|TestProxy|TestYouTube|TestUnifiedSorted|TestSpeedSettingsPersist|TestSettingsUnitSelector)' . 2>&1 | tee -a "$RUNNER_TEMP/fluxget-windows-tests.log"
           go vet -tags ci ./...
       - name: Build native installer
         env:

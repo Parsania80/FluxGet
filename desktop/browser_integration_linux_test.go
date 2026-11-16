@@ -234,8 +234,8 @@ func TestBrowserNativeChromeAcceptance(t *testing.T) {
 					return
 				case <-ticker.C:
 					driver.DoFromGoroutine(func() {
-						if v.browsers.promptID != "" {
-							test.Tap(batchDialogButton(t, w, "Use FluxGet"))
+						if v.browsers.promptID != "" && v.browsers.promptWindow != nil && v.browsers.promptWindow.Title() == "Download with FluxGet?" {
+							test.Tap(batchDialogButton(t, v.browsers.promptWindow, "Use FluxGet"))
 							prompts.Add(1)
 						}
 					}, true)
