@@ -43,7 +43,7 @@ jobs:
       - name: Native proxy and YouTube desktop controls
         working-directory: desktop
         run: |
-          if go test -race -tags ci -count=1 -v -run '^(TestBrowserSettingsActions|TestProxy|TestYouTube|TestUnifiedSorted|TestSpeedSettingsPersist|TestSettingsUnitSelector)' . > "$RUNNER_TEMP/fluxget-desktop-controls.log" 2>&1; then
+          if go test -race -tags ci -count=1 -v -run '^(TestBrowserDuplicate|TestSharedDuplicate|TestBrowserDownloadPrompt|TestBrowserSettingsActions|TestProxy|TestYouTube|TestUnifiedSorted|TestSpeedSettingsPersist|TestSettingsUnitSelector)' . > "$RUNNER_TEMP/fluxget-desktop-controls.log" 2>&1; then
             cat "$RUNNER_TEMP/fluxget-desktop-controls.log"
           else
             cat "$RUNNER_TEMP/fluxget-desktop-controls.log"

@@ -4,7 +4,7 @@
 
 FluxGet is a download manager written in Go. It helps you manage several downloads, control their speed, and continue saved downloads after an interruption when the server allows it.
 
-**[Version 1.0.0 is available for Linux and Windows (64-bit Intel/AMD).](https://github.com/Parsania80/FluxGet/releases/tag/v1.0.0)** Native checks and installer verification passed on both operating systems. Version tags publish packages after native checks pass. Release-preparation pull requests also build and test installers without publishing them. Windows browser capture and other Linux distributions still need hands-on testing. macOS is not included.
+**Version 2.0.2 is available for 64-bit Windows and Debian/Ubuntu.** It fixes Chrome handoffs, cancellation, Ctrl-click browser controls and duplicate-download choices. Both installers passed native verification. Chrome has hands-on Windows evidence. Firefox, Opera and other Linux distributions still need native testing. [Download FluxGet v2.0.2](https://github.com/Parsania80/FluxGet/releases/tag/v2.0.2)
 
 **[Version 2.0.0](https://github.com/Parsania80/FluxGet/releases/tag/v2.0.0)** introduced YouTube videos and playlists, per-download proxy routing, and automatic file-type folders. Version 2.0.1 adds guided browser setup, a first-use YouTube tools prompt, and a saved appearance choice. The [releases page](https://github.com/Parsania80/FluxGet/releases) lists published Windows and Linux installers.
 
@@ -25,12 +25,12 @@ On Linux, Automatic also watches CPU, memory, and storage pressure and reduces w
 
 Get the package for your system from [GitHub Releases](https://github.com/Parsania80/FluxGet/releases).
 
-- **Windows:** Open `fluxget-1.0.0-windows-amd64-setup.exe` and follow the setup wizard. Open FluxGet from its new shortcut. Use NTFS for downloads and saved progress.
-- **Debian/Ubuntu Linux:** Run `sudo dpkg -i fluxget_1.0.0_amd64.deb`, then open FluxGet from the applications menu. If dependencies are missing, `sudo apt install ./fluxget_1.0.0_amd64.deb` installs them too.
+- **Windows:** Open `fluxget-2.0.2-windows-amd64-setup.exe` and follow the setup wizard. Open FluxGet from its new shortcut. Use NTFS for downloads and saved progress.
+- **Debian/Ubuntu Linux:** Run `sudo dpkg -i fluxget_2.0.2_amd64.deb`, then open FluxGet from the applications menu. If dependencies are missing, `sudo apt install ./fluxget_2.0.2_amd64.deb` installs them too.
 
 Both installers include the app, engine, browser hosts, and extension folders. See the release notes for system requirements and testing limits.
 
-The local Windows preview uses the 2.0.0 version label. To test its browser setup, open **Settings → Browser downloads → Set up browser extension**. If Chrome already has FluxGet loaded from this installation, use **Reload** on the FluxGet card in `chrome://extensions`.
+To set up browser downloads, open **Settings → Browser downloads → Set up browser extension**. After upgrading, use **Reload** on the FluxGet card in `chrome://extensions` and refresh download pages.
 
 ## Build and open the desktop app
 
@@ -112,7 +112,25 @@ Choose **Download automatically** for capture, or **Ask before downloading** to 
 
 Use a normal left-click to download with FluxGet. Hold **Ctrl + left-click** to keep that download in your browser; the browser's usual Ctrl-click navigation still applies. When an update adds shortcut permissions, finish capture setup once and reload the website. Chrome may briefly show a download during handoff; its canceled history entry is removed after FluxGet confirms ownership. Existing unrelated history is kept.
 
-Chrome capture, query-string/CDN redirects and browser fallback have passed a native test. Windows capture, Firefox Snap and Opera still need native verification. Firefox temporary extensions disappear after browser restart; permanent installation needs a signed add-on. Windows setup does not register Opera yet. Logins, POST downloads, private browsing and uncertain requests stay in the browser. If capture is skipped, its reason appears near the top of the popup.
+Chrome capture, query-string/CDN redirects and browser fallback have native test evidence, including hands-on Windows capture and duplicate handling. Firefox Snap and Opera still need native verification. Firefox temporary extensions disappear after browser restart; permanent installation needs a signed add-on. Windows setup does not register Opera yet. Logins, POST downloads, private browsing and uncertain requests stay in the browser. If capture is skipped, its reason appears near the top of the popup.
+
+After replacing an unpacked Chrome extension, click **Reload** on its card at `chrome://extensions`, then refresh the actual download website with **Ctrl+F5**. An old page script can report **Extension context invalidated** after an extension reload. The updated script releases stale handlers cleanly. Ctrl + left-click gives Chrome control of the download, including its Pause and Cancel buttons. The popup shows why a transfer stayed in Chrome.
+
+Windows live verification on 2026-11-16 confirmed Chrome can pause and cancel downloads started with Ctrl + left-click after the updated page handler loaded.
+
+**Test connection** shows its result below the button. It checks whether FluxGet responds to the extension. The latest download result appears near the top of the popup and identifies cookie, authorization or byte-range restrictions when they apply. For a file that the server offers without a browser session, **Send link to FluxGet** starts a separate request from the original link.
+
+For common direct file links such as `.rar`, `.zip` and `.exe`, the updated extension opens FluxGet's approval popup before Chrome starts a transfer. Choosing **Use FluxGet** sends the link directly to the app. Choosing **Use browser** starts the original Chrome download. Ctrl + left-click also uses Chrome. Existing Chrome history entries belong to earlier transfers.
+
+For downloads first detected in Chrome, the extension checks access without cookies and compares file metadata when cookies were present. A successful check opens the FluxGet prompt. If the server requires a browser session or cannot provide matching metadata, Chrome keeps the transfer.
+
+In **Ask before downloading** mode, the updated desktop opens a separate **Download with FluxGet?** window above other windows. Choose **Use FluxGet** to approve or **Use browser** to continue in Chrome. Closing the window cancels the request. If Chrome had already started the transfer, FluxGet cancels that exact transfer and removes its canceled history entry.
+
+Reloading the extension refreshes its click handler on open pages with website access. The handler catches common file links before document click handlers can start a browser transfer. After installing this preview, reload FluxGet at `chrome://extensions` and refresh the download page once. Chrome retains old extension errors until you clear them; report any new error after clearing the list.
+
+Windows verification on 2026-11-16 confirmed that a normal file click opens the FluxGet prompt and closing it cancels without creating a new Chrome download. The local extension trace confirms direct-link capture, cancellation and no pending handoffs.
+
+If a browser link is already downloading in FluxGet or its filename is in use, FluxGet opens **Download already exists**. Choose **Continue existing download**, **Save another copy**, or **Keep existing file**. **Replace existing file…** is available when a finished file exists and asks for confirmation; it keeps the original until the replacement finishes successfully. Canceling or encountering a conflict after choosing FluxGet does not start Chrome. Continuing the existing download was verified on Windows on 2026-11-16.
 
 ## Use the command line
 
@@ -142,7 +160,7 @@ Resume uses the same output path and requires a valid saved checkpoint. The stan
 
 ## Development
 
-Development uses `main`. The passing folder feature is merged; v2.0.0 release preparation is on `release-v2.0.0`. Publish this branch through GitHub Desktop and open a pull request to rehearse both installers, including first-use media setup. After the checks pass and the branch is merged, a `v2.0.0` tag triggers publication. The first release remains preserved as `v1.0.0`.
+Development uses `main`. The `release-v2.0.0` branch includes the v2.0.2 fixes. Version tags trigger native Windows and Linux tests, installer verification and publication of both installers with checksums. Branch pushes run CI without publishing.
 
 The engine and desktop are separate Go modules. Run checks in both:
 
